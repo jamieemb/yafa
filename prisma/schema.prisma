@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// Recurring monthly outflows: bills, subscriptions, finance payments,
+// and pre-allocated budget pots (e.g. petrol, food). Each item belongs
+// to one budget category (== pot) and feeds the dashboard's
+// "transfer this much when paid" calculation.
+model RecurringItem {
+  id             String    @id @default(cuid())
+  name           String
+  amount         Float
+  budgetCategory String?
+  bankAccount    String?
+  frequency      String    @default("MONTHLY") // MONTHLY | WEEKLY | QUARTERLY | ANNUAL
+  dayOfMonth     Int?
+  startDate      DateTime  @default(now())
+  endDate        DateTime?
+  notes          String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([budgetCategory])
+  @@index([active])
+  @@index([bankAccount])
+}
+
+// Per-month income entries.
+//
+// The pay-cycle convention: payday usually lands at the END of the
+// previous calendar month and funds the upcoming budget month. So we
+// record both:
+//   month     — the BUDGET month this income funds (e.g. 2026-05-01)
+//   paidDate  — when the money actually landed (e.g. 2026-04-25)
+// `month` is canonicalised to the first of the month at 00:00 UTC.
+model IncomeEntry {
+  id          String    @id @default(cuid())
+  month       DateTime
+  paidDate    DateTime?
+  person      String?
+  label       String
+  amount      Float
+  bankAccount String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([month])
+  @@index([paidDate])
+  @@index([person])
+}
+
+model StatementImport {
+  id               String        @id @default(cuid())
+  source           String
+  filename         String
+  importedAt       DateTime      @default(now())
+  transactionCount Int           @default(0)
+  transactions     Transaction[]
+}
+
+model Transaction {
+  id                    String           @id @default(cuid())
+  date                  DateTime
+  description           String
+  normalisedDescription String
+  amount                Float
+  source                String
+  // SPEND covers normal charges and merchant refunds (positive-amount
+  // refunds still relate to a real category). PAYMENT marks money
+  // moving in to clear the card balance — not useful for spend tracking
+  // and hidden from default views.
+  kind                  String           @default("SPEND")
+  spendCategory         String?
+  needsReview           Boolean          @default(true)
+  notes                 String?
+  importId              String?
+  import                StatementImport? @relation(fields: [importId], references: [id], onDelete: SetNull)
+  payCycleId            String?
+  payCycle              PayCycle?        @relation(fields: [payCycleId], references: [id], onDelete: SetNull)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([date])
+  @@index([kind])
+  @@index([needsReview])
+  @@index([spendCategory])
+  @@index([normalisedDescription])
+  @@index([payCycleId])
+}
+
+// Reconciliation record: when the user pays £X to a card, we look up
+// which transactions sum exactly to £X and attach them to a cycle.
+// Going forward those transactions are "settled" and excluded from the
+// uncycled pool.
+model PayCycle {
+  id           String        @id @default(cuid())
+  source       String
+  paidAmount   Float
+  paidDate     DateTime
+  notes        String?
+  createdAt    DateTime      @default(now())
+  transactions Transaction[]
+
+  @@index([source])
+  @@index([paidDate])
+}
+
+// Single-row settings table. Use id="singleton" to keep it idempotent.
+model Settings {
+  id             String   @id @default("singleton")
+  // Discretionary split — percentages of left-over income. Stored as
+  // 0..1 floats; UI exposes them as 0..100.
+  savingsPercent Float    @default(0.40)
+  investPercent  Float    @default(0.35)
+  freePercent    Float    @default(0.25)
+  // Default gift / event budget by importance tier (£).
+  giftLow        Float    @default(20)
+  giftMedium     Float    @default(50)
+  giftHigh       Float    @default(100)
+  // UI theme identifier — one of the keys in src/lib/themes.ts.
+  theme          String   @default("treasury")
+  updatedAt      DateTime @updatedAt
+}
+
+// One-off purchases and recurring annuals (Christmas, anniversaries,
+// parties). Birthdays live on Person — the calendar page composes
+// them in for display.
+//
+// Amount resolution: if `amount` is set, it wins. Otherwise if
+// `importance` is set we look up the matching gift tier in Settings.
+// Otherwise the event has no allocated budget.
+model CalendarEvent {
+  id              String   @id @default(cuid())
+  title           String
+  date            DateTime
+  recursAnnually  Boolean  @default(false)
+  importance      String?  // LOW | MEDIUM | HIGH
+  amount          Float?
+  person          String?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([date])
+  @@index([recursAnnually])
+}
+
+// People you might buy gifts for. `importance` drives the default
+// budget (per Settings.giftLow/Medium/High). `birthday`, when set,
+// surfaces as an annual entry on the calendar.
+model Person {
+  id         String    @id @default(cuid())
+  name       String
+  importance String    // LOW | MEDIUM | HIGH
+  birthday   DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([importance])
+}
+
+// Learned mapping from merchant name (or substring) -> spend category.
+// Created automatically when the user manually categorises a transaction
+// for the first time, and reused on future imports.
+model CategoryRule {
+  id            String   @id @default(cuid())
+  matchPattern  String
+  spendCategory String
+  autoCreated   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([matchPattern])
+}

@@ -1,0 +1,25 @@
+# Production-style compose — pulls the published image and runs against
+# a Docker-managed named volume. Drop this on any host with Docker and
+# `docker compose up -d` will get YAFA running.
+#
+# For local development against your working copy, layer the dev
+# override on top:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+
+services:
+  yafa:
+    image: ghcr.io/jamieemb/yafa:latest
+    container_name: yafa
+    restart: unless-stopped
+    ports:
+      # host:container — change the host side if 3000 is taken
+      - "3000:3000"
+    volumes:
+      - yafa-data:/data
+    environment:
+      DATABASE_URL: file:/data/yafa.db
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+
+volumes:
+  yafa-data:

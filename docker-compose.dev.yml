@@ -1,0 +1,17 @@
+# Development override — layers on top of docker-compose.yml to build
+# from local source instead of pulling, and bind-mount ./data so the
+# SQLite file is visible on the host.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# (host directory ./data needs to be writable by uid 1001:
+#   mkdir -p data && sudo chown 1001:1001 data )
+
+services:
+  yafa:
+    build:
+      context: .
+    image: yafa:dev
+    volumes:
+      - ./data:/data

@@ -1,0 +1,65 @@
+import { prisma } from "@/lib/db";
+import type { ImportanceLevel } from "@/lib/categories";
+import type { Theme } from "@/lib/themes";
+
+export interface AppSettings {
+  savingsPercent: number; // 0..1
+  investPercent: number;
+  freePercent: number;
+  giftLow: number;
+  giftMedium: number;
+  giftHigh: number;
+  theme: Theme;
+}
+
+const DEFAULTS: AppSettings = {
+  savingsPercent: 0.40,
+  investPercent: 0.35,
+  freePercent: 0.25,
+  giftLow: 20,
+  giftMedium: 50,
+  giftHigh: 100,
+  theme: "treasury",
+};
+
+// Read-only fetch; ensures the singleton row exists.
+export async function getSettings(): Promise<AppSettings> {
+  const row = await prisma.settings.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton" },
+    update: {},
+  });
+  return {
+    savingsPercent: row.savingsPercent,
+    investPercent: row.investPercent,
+    freePercent: row.freePercent,
+    giftLow: row.giftLow,
+    giftMedium: row.giftMedium,
+    giftHigh: row.giftHigh,
+    theme: (row.theme ?? "treasury") as Theme,
+  };
+}
+
+export function giftAmountFor(
+  settings: AppSettings,
+  importance: ImportanceLevel | null | undefined,
+): number {
+  if (!importance) return 0;
+  if (importance === "LOW") return settings.giftLow;
+  if (importance === "MEDIUM") return settings.giftMedium;
+  if (importance === "HIGH") return settings.giftHigh;
+  return 0;
+}
+
+// Resolve an event's effective budget — explicit amount wins, else the
+// importance tier from settings, else 0.
+export function resolveEventAmount(
+  settings: AppSettings,
+  amount: number | null | undefined,
+  importance: ImportanceLevel | null | undefined,
+): number {
+  if (amount !== null && amount !== undefined) return amount;
+  return giftAmountFor(settings, importance);
+}
+
+export const DEFAULT_SETTINGS = DEFAULTS;

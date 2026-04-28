@@ -1,0 +1,30 @@
+node_modules
+.next
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose.yml
+docker-entrypoint.sh
+
+# Environment / secrets
+.env
+.env.*
+
+# Local SQLite data
+*.db
+*.db-journal
+data/
+
+# Editor / IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Local-only state
+.claude/
+samples/
+scripts/
+README.md
+AGENTS.md
+CLAUDE.md
