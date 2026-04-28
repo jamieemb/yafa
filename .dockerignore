@@ -5,7 +5,7 @@ node_modules
 .dockerignore
 Dockerfile
 docker-compose.yml
-docker-entrypoint.sh
+docker-compose.dev.yml
 
 # Environment / secrets
 .env
