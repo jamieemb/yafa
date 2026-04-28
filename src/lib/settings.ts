@@ -22,22 +22,31 @@ const DEFAULTS: AppSettings = {
   theme: "treasury",
 };
 
-// Read-only fetch; ensures the singleton row exists.
+// Read-only fetch; ensures the singleton row exists. Falls back to
+// hard-coded defaults if the DB isn't reachable yet — important during
+// `next build`'s static prerender of /_not-found, which runs the root
+// layout (and therefore getSettings) before any DB exists.
 export async function getSettings(): Promise<AppSettings> {
-  const row = await prisma.settings.upsert({
-    where: { id: "singleton" },
-    create: { id: "singleton" },
-    update: {},
-  });
-  return {
-    savingsPercent: row.savingsPercent,
-    investPercent: row.investPercent,
-    freePercent: row.freePercent,
-    giftLow: row.giftLow,
-    giftMedium: row.giftMedium,
-    giftHigh: row.giftHigh,
-    theme: (row.theme ?? "treasury") as Theme,
-  };
+  try {
+    const row = await prisma.settings.upsert({
+      where: { id: "singleton" },
+      create: { id: "singleton" },
+      update: {},
+    });
+    return {
+      savingsPercent: row.savingsPercent,
+      investPercent: row.investPercent,
+      freePercent: row.freePercent,
+      giftLow: row.giftLow,
+      giftMedium: row.giftMedium,
+      giftHigh: row.giftHigh,
+      theme: (row.theme ?? "treasury") as Theme,
+    };
+  } catch {
+    // No DB / no Settings table yet — return defaults so the layout
+    // (and any prerendered page that wraps it) can still render.
+    return DEFAULTS;
+  }
 }
 
 export function giftAmountFor(
