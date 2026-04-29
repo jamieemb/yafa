@@ -4,8 +4,13 @@
 # runs apply any schema changes that have rolled in with new code.
 set -e
 
+# Default to the in-container path so the script works even if the
+# orchestrator forgot to set the env var.
+: "${DATABASE_URL:=file:/data/yafa.db}"
+export DATABASE_URL
+
 echo "[yafa] Syncing schema to ${DATABASE_URL}..."
-npx --no-install prisma db push --accept-data-loss --skip-generate
+./node_modules/.bin/prisma db push --accept-data-loss
 
 echo "[yafa] Starting server..."
 exec "$@"

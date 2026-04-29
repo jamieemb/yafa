@@ -31,6 +31,13 @@ RUN npm run build
 FROM node:24-bookworm-slim AS runtime
 WORKDIR /app
 
+# openssl is required by Prisma's CLI engine for `prisma db push` at
+# entrypoint; without it Prisma can't detect the libssl version and
+# falls back to a non-existent "openssl-1.1.x" on Bookworm.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000

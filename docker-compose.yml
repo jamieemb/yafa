@@ -1,14 +1,16 @@
-# Production-style compose — pulls the published image and runs against
-# a Docker-managed named volume. Drop this on any host with Docker and
-# `docker compose up -d` will get YAFA running.
+# Self-contained compose — builds from this checkout's Dockerfile and
+# runs against a Docker-managed named volume.
 #
-# For local development against your working copy, layer the dev
-# override on top:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#   docker compose up -d --build
+#
+# To pull a published image instead of building, set YAFA_IMAGE to the
+# registry tag, e.g. `YAFA_IMAGE=ghcr.io/jamieemb/yafa:latest`.
 
 services:
   yafa:
-    image: ghcr.io/jamieemb/yafa:latest
+    build:
+      context: .
+    image: ${YAFA_IMAGE:-yafa:local}
     container_name: yafa
     restart: unless-stopped
     ports:
