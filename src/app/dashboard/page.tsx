@@ -5,6 +5,7 @@ import {
   ArrowUpRight,
   Cake,
   CalendarDays,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   PiggyBank,
@@ -20,6 +21,7 @@ import {
   type Frequency,
   type ImportanceLevel,
 } from "@/lib/categories";
+import { dueStatusFor, dueLabel } from "@/lib/admin";
 import { Kpi } from "@/components/kpi";
 import { AllocationChart } from "./_components/allocation-chart";
 
@@ -108,19 +110,26 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   // Fetch active recurring outflows that are live for this budget month
   // (started before/at the month, and either ongoing or ending after it).
-  const [outItems, incomeEntries, settings, calendarEvents, people] =
-    await Promise.all([
-      prisma.recurringItem.findMany({
-        where: {
-          active: true,
-          OR: [{ endDate: null }, { endDate: { gte: budgetMonth } }],
-        },
-      }),
-      prisma.incomeEntry.findMany({ where: { month: budgetMonth } }),
-      getSettings(),
-      prisma.calendarEvent.findMany(),
-      prisma.person.findMany({ where: { birthday: { not: null } } }),
-    ]);
+  const [
+    outItems,
+    incomeEntries,
+    settings,
+    calendarEvents,
+    people,
+    activeRenewals,
+  ] = await Promise.all([
+    prisma.recurringItem.findMany({
+      where: {
+        active: true,
+        OR: [{ endDate: null }, { endDate: { gte: budgetMonth } }],
+      },
+    }),
+    prisma.incomeEntry.findMany({ where: { month: budgetMonth } }),
+    getSettings(),
+    prisma.calendarEvent.findMany(),
+    prisma.person.findMany({ where: { birthday: { not: null } } }),
+    prisma.renewal.findMany({ where: { active: true } }),
+  ]);
 
   // Calendar entries falling in the selected budget month — drives the
   // "Birthdays & Events" pot total + the dedicated section below.
@@ -232,6 +241,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }));
 
   const today = new Date();
+
+  // Active renewals due within the next ~90 days (plus anything overdue),
+  // surfaced as read-only reminders — renewals don't affect the budget maths.
+  const RENEWAL_HORIZON_DAYS = 90;
+  const upcomingRenewals = activeRenewals
+    .map((r) => ({
+      renewal: r,
+      ...dueStatusFor(r.dueDate, r.reminderDays, today),
+    }))
+    .filter((r) => r.days <= RENEWAL_HORIZON_DAYS)
+    .sort((a, b) => a.renewal.dueDate.getTime() - b.renewal.dueDate.getTime())
+    .slice(0, 6);
+
   const isCurrentMonth = monthIso === currentMonthIso();
   const prevIso = dateToIso(shiftMonths(budgetMonth, -1));
   const nextIso = dateToIso(shiftMonths(budgetMonth, 1));
@@ -520,6 +542,77 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   </li>
                 );
               })}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {/* Upcoming renewals */}
+      <div className="grid grid-cols-12 gap-5">
+        <div className="col-span-12 rounded-md border bg-card p-5">
+          <div className="flex items-baseline justify-between mb-3.5">
+            <div>
+              <p className="label-eyebrow">Life admin</p>
+              <h2 className="text-base font-semibold mt-1">
+                Upcoming renewals
+              </h2>
+            </div>
+            <Link
+              href="/renewals"
+              className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              View all →
+            </Link>
+          </div>
+          {upcomingRenewals.length === 0 ? (
+            <div className="py-8 text-center">
+              <p className="text-[13px] text-muted-foreground mb-2">
+                Nothing due in the next {RENEWAL_HORIZON_DAYS} days.
+              </p>
+              <Link
+                href="/renewals"
+                className="text-[12px] font-medium text-primary hover:underline underline-offset-4"
+              >
+                Track a renewal →
+              </Link>
+            </div>
+          ) : (
+            <ul className="divide-y -mx-5 px-5">
+              {upcomingRenewals.map(({ renewal, status, days }) => (
+                <li
+                  key={renewal.id}
+                  className="grid grid-cols-[24px_64px_1fr_auto_auto] items-center gap-3 py-2"
+                >
+                  <span className="flex items-center justify-center size-6 rounded-md bg-primary/10 text-primary">
+                    <CalendarClock className="size-3" />
+                  </span>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground tabular-nums">
+                    {format(renewal.dueDate, "d MMM")}
+                  </span>
+                  <span className="text-[13px] truncate">
+                    {renewal.title}
+                    <span className="text-muted-foreground">
+                      {" · "}
+                      {renewal.category}
+                      {renewal.subject ? ` · ${renewal.subject}` : ""}
+                    </span>
+                  </span>
+                  <span
+                    className={`text-[10px] uppercase tracking-wider tabular-nums text-right ${
+                      status === "overdue"
+                        ? "text-negative"
+                        : status === "due-soon"
+                          ? "text-primary"
+                          : "text-muted-foreground"
+                    }`}
+                  >
+                    {dueLabel(days)}
+                  </span>
+                  <span className="font-mono tabular-nums text-[13px] w-16 text-right">
+                    {renewal.cost != null ? formatGBP(renewal.cost) : "—"}
+                  </span>
+                </li>
+              ))}
             </ul>
           )}
         </div>

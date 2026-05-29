@@ -12,6 +12,8 @@ import {
   Wallet,
   CircleCheck,
   CalendarDays,
+  CalendarClock,
+  Gauge,
   Users,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -50,6 +52,13 @@ const NAV_ITEMS: NavSection[] = [
     items: [
       { href: "/calendar", label: "Calendar", icon: CalendarDays },
       { href: "/people", label: "People", icon: Users },
+    ],
+  },
+  {
+    section: "Life admin",
+    items: [
+      { href: "/renewals", label: "Renewals", icon: CalendarClock },
+      { href: "/meters", label: "Meter readings", icon: Gauge },
     ],
   },
   {

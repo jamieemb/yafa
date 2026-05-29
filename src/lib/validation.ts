@@ -4,6 +4,7 @@ import {
   FREQUENCIES,
   IMPORTANCE_LEVELS,
 } from "./categories";
+import { RENEWAL_CATEGORIES, RENEWAL_RECURRENCES } from "./admin";
 import { THEMES } from "./themes";
 
 const optionalDate = z
@@ -164,3 +165,57 @@ export const personSchema = z.object({
 });
 
 export type PersonInput = z.infer<typeof personSchema>;
+
+const requiredDate = (label: string) =>
+  z
+    .union([z.string(), z.date()])
+    .transform((v) => (v instanceof Date ? v : new Date(v)))
+    .refine((d) => !Number.isNaN(d.getTime()), `Invalid ${label}`);
+
+export const renewalSchema = z.object({
+  title: z
+    .string()
+    .min(1, "Title is required")
+    .max(120)
+    .transform((s) => s.trim()),
+  category: z.enum(RENEWAL_CATEGORIES),
+  subject: optionalString,
+  provider: optionalString,
+  reference: optionalString,
+  dueDate: requiredDate("due date"),
+  cost: z
+    .union([z.string(), z.number()])
+    .transform((v) =>
+      v === "" || v === null || v === undefined ? null : Number(v),
+    )
+    .pipe(z.number().min(0, "Cost can't be negative").nullable())
+    .optional()
+    .nullable(),
+  recurrence: z.enum(RENEWAL_RECURRENCES).default("ANNUAL"),
+  // Reminder lead time in days; blank falls back to 30.
+  reminderDays: z
+    .union([z.string(), z.number()])
+    .transform((v) => (v === "" || v === null || v === undefined ? 30 : Number(v)))
+    .pipe(z.number().int().min(0).max(3650)),
+  notes: optionalString,
+  active: z
+    .union([z.string(), z.boolean()])
+    .transform((v) => v === true || v === "true" || v === "on")
+    .optional(),
+});
+
+export type RenewalInput = z.infer<typeof renewalSchema>;
+
+export const meterReadingSchema = z.object({
+  meter: z
+    .string()
+    .min(1, "Meter is required")
+    .max(60)
+    .transform((s) => s.trim()),
+  date: requiredDate("date"),
+  value: z.coerce.number().min(0, "Reading can't be negative"),
+  unit: optionalString,
+  notes: optionalString,
+});
+
+export type MeterReadingInput = z.infer<typeof meterReadingSchema>;

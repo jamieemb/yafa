@@ -180,3 +180,52 @@ model CategoryRule {
 
   @@index([matchPattern])
 }
+
+// ── Life Admin ──────────────────────────────────────────────────────────
+// Non-financial life tracking. These are reminders/records only and do
+// NOT feed the budget maths (RecurringItem covers committed spend).
+
+// A tracked obligation that comes due on a date and usually recurs:
+// insurance renewals, MOT, vehicle service, road tax, TV licence,
+// warranties, passport/licence expiries.
+//
+// `dueDate` is the next date it falls due. "Mark renewed" rolls it
+// forward by `recurrence`. `reminderDays` sets how far ahead it counts
+// as "due soon" on the list + dashboard.
+model Renewal {
+  id           String    @id @default(cuid())
+  title        String
+  category     String                       // one of RENEWAL_CATEGORIES
+  subject      String?                      // optional asset grouping, e.g. "Honda Civic", "Home"
+  provider     String?                      // e.g. "Aviva", "Kwik Fit"
+  reference    String?                      // policy / account / registration number
+  dueDate      DateTime
+  cost         Float?
+  recurrence   String    @default("ANNUAL") // NONE | MONTHLY | QUARTERLY | ANNUAL | BIENNIAL
+  reminderDays Int       @default(30)
+  notes        String?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([dueDate])
+  @@index([category])
+  @@index([active])
+}
+
+// A point-in-time meter reading. Cumulative meters (electricity kWh, gas
+// & water m³, even car mileage) are tracked as a running log; usage
+// between two readings is the difference in `value`. Grouped by the
+// free-text `meter` label so any kind of meter can be tracked.
+model MeterReading {
+  id        String   @id @default(cuid())
+  meter     String                  // "Electricity", "Gas", "Water", ...
+  date      DateTime
+  value     Float
+  unit      String?                 // "kWh", "m³", "miles", ...
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([meter, date])
+}
