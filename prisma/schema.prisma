@@ -229,3 +229,40 @@ model MeterReading {
 
   @@index([meter, date])
 }
+
+// Mileage allowance tracking for a PCP / lease contract. One contract per
+// vehicle: a start date + starting odometer define the origin, an annual
+// allowance × term gives the total mileage budget. Weekly odometer
+// readings let the app compute miles driven, pace vs. allowance, and a
+// projection of whether you'll stay within budget for the full term.
+model MileageContract {
+  id              String           @id @default(cuid())
+  label           String                          // e.g. "Honda Civic PCP"
+  startDate       DateTime                         // tracking origin
+  startOdometer   Float            @default(0)     // odometer at startDate
+  annualAllowance Float            @default(8000)  // miles per year
+  termYears       Int              @default(4)
+  active          Boolean          @default(true)
+  notes           String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  readings        MileageReading[]
+
+  @@index([active])
+}
+
+// A single odometer reading against a mileage contract. Miles driven in a
+// period is the difference between consecutive odometer values (the first
+// reading is measured against the contract's startOdometer).
+model MileageReading {
+  id         String          @id @default(cuid())
+  contractId String
+  contract   MileageContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  date       DateTime
+  odometer   Float                          // absolute odometer value
+  notes      String?
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+
+  @@index([contractId, date])
+}

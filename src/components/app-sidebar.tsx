@@ -14,6 +14,7 @@ import {
   CalendarDays,
   CalendarClock,
   Gauge,
+  Car,
   Users,
   Settings as SettingsIcon,
 } from "lucide-react";
@@ -59,6 +60,7 @@ const NAV_ITEMS: NavSection[] = [
     items: [
       { href: "/renewals", label: "Renewals", icon: CalendarClock },
       { href: "/meters", label: "Meter readings", icon: Gauge },
+      { href: "/mileage", label: "Mileage", icon: Car },
     ],
   },
   {

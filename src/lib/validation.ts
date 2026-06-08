@@ -219,3 +219,36 @@ export const meterReadingSchema = z.object({
 });
 
 export type MeterReadingInput = z.infer<typeof meterReadingSchema>;
+
+export const mileageContractSchema = z.object({
+  label: z
+    .string()
+    .min(1, "Label is required")
+    .max(120)
+    .transform((s) => s.trim()),
+  startDate: requiredDate("start date"),
+  startOdometer: z.coerce.number().min(0, "Starting odometer can't be negative"),
+  annualAllowance: z.coerce
+    .number()
+    .positive("Annual allowance must be greater than zero"),
+  termYears: z.coerce
+    .number()
+    .int()
+    .min(1, "Term must be at least 1 year")
+    .max(20),
+  notes: optionalString,
+  active: z
+    .union([z.string(), z.boolean()])
+    .transform((v) => v === true || v === "true" || v === "on")
+    .optional(),
+});
+
+export type MileageContractInput = z.infer<typeof mileageContractSchema>;
+
+export const mileageReadingSchema = z.object({
+  date: requiredDate("date"),
+  odometer: z.coerce.number().min(0, "Odometer can't be negative"),
+  notes: optionalString,
+});
+
+export type MileageReadingInput = z.infer<typeof mileageReadingSchema>;
