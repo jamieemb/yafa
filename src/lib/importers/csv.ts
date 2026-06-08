@@ -36,6 +36,13 @@ export function pick(
   return undefined;
 }
 
+// True if the parsed header row contains at least one of the aliases.
+// Headers come back from parseCsv already lowercased + trimmed.
+export function hasColumn(headers: string[], aliases: string[]): boolean {
+  const set = new Set(headers);
+  return aliases.some((a) => set.has(a.toLowerCase()));
+}
+
 export function requirePick(
   row: Record<string, string>,
   aliases: string[],
