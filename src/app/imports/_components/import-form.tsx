@@ -31,7 +31,12 @@ export function ImportForm() {
 
     startTransition(async () => {
       try {
-        const result = await importStatement(formData);
+        const outcome = await importStatement(formData);
+        if (!outcome.ok) {
+          toast.error(outcome.error);
+          return;
+        }
+        const { result } = outcome;
         toast.success(
           `Imported ${result.imported}` +
             (result.skipped ? ` · skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}` : "") +
@@ -49,8 +54,14 @@ export function ImportForm() {
               : ""),
         );
         formRef.current?.reset();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Import failed");
+      } catch {
+        // importStatement returns expected failures as data, so reaching
+        // here means the request itself failed before the action ran —
+        // most commonly the file exceeding the Server Action upload
+        // limit, or the server being unreachable.
+        toast.error(
+          "Import request failed — the file may be too large, or the server is unreachable.",
+        );
       }
     });
   }

@@ -20,7 +20,32 @@ export interface ImportResult {
   refunds: number;
 }
 
-export async function importStatement(formData: FormData): Promise<ImportResult> {
+// Expected import failures (bad CSV, unrecognised date, missing column,
+// duplicate-only file, …) are returned as data rather than thrown.
+// A production Next.js build strips the message off any Error thrown
+// from a Server Action and replaces it with an opaque generic string,
+// so throwing would hide the one thing the user needs to see — the real
+// reason their statement didn't import.
+export type ImportOutcome =
+  | { ok: true; result: ImportResult }
+  | { ok: false; error: string };
+
+export async function importStatement(
+  formData: FormData,
+): Promise<ImportOutcome> {
+  try {
+    const result = await runImport(formData);
+    return { ok: true, result };
+  } catch (err) {
+    // Log the full error server-side (container logs) for unexpected
+    // failures, but hand a useful message back to the UI.
+    console.error("[import] failed:", err);
+    const error = err instanceof Error ? err.message : "Import failed";
+    return { ok: false, error };
+  }
+}
+
+async function runImport(formData: FormData): Promise<ImportResult> {
   const sourceStr = String(formData.get("source") ?? "");
   if (!STATEMENT_SOURCES.includes(sourceStr as StatementSource)) {
     throw new Error(`Unknown source: "${sourceStr}"`);
