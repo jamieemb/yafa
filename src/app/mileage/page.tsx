@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import { format } from "date-fns";
-import { Car, CircleCheck, CircleAlert, Gauge } from "lucide-react";
+import { Car, CircleCheck, CircleAlert, Gauge, Route } from "lucide-react";
 import { prisma } from "@/lib/db";
 import {
   computeMileageStats,
   monthlyBreakdown,
   buildMileageSeries,
+  computeTripInsights,
+  tripsToPoints,
   formatMiles,
   formatMilesSigned,
   formatRate,
+  formatDuration,
 } from "@/lib/mileage";
 import {
   Table,
@@ -20,17 +23,30 @@ import {
 } from "@/components/ui/table";
 import { Kpi } from "@/components/kpi";
 import { ContractDialog } from "./_components/contract-dialog";
-import { AddReadingDialog } from "./_components/add-reading-dialog";
-import { DeleteReadingButton } from "./_components/delete-reading-button";
 import { DeleteContractButton } from "./_components/delete-contract-button";
+import { ImportTripsDialog } from "./_components/import-trips-dialog";
+import { DeleteTripImportButton } from "./_components/delete-trip-import-button";
 import { MileageChart } from "./_components/mileage-chart";
+import { JourneyMap, type TripLeg } from "./_components/journey-map";
+import { TripsTable, type TripData } from "./_components/trips-table";
+
+// Trip import timestamps store UTC wall-clock times — format in UTC to show
+// exactly as recorded.
+const utcDate = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "UTC",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+});
 
 export const dynamic = "force-dynamic";
 
 export default async function MileagePage() {
   const contract = await prisma.mileageContract.findFirst({
     orderBy: [{ active: "desc" }, { createdAt: "desc" }],
-    include: { readings: { orderBy: { date: "asc" } } },
+    include: {
+      trips: { orderBy: { startAt: "asc" } },
+    },
   });
 
   if (!contract) {
@@ -41,7 +57,8 @@ export default async function MileagePage() {
           <Car className="size-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground max-w-sm">
             Track a PCP or lease mileage allowance. Set your start date,
-            starting odometer and yearly limit, then add a reading each week.
+            starting odometer and yearly limit, then import your trip history
+            each week.
           </p>
           <ContractDialog />
         </div>
@@ -49,19 +66,54 @@ export default async function MileagePage() {
     );
   }
 
-  const stats = computeMileageStats(contract, contract.readings);
-  const months = monthlyBreakdown(contract, contract.readings);
-  const series = buildMileageSeries(contract, contract.readings, stats);
+  const tripImports = await prisma.tripImport.findMany({
+    orderBy: { importedAt: "desc" },
+  });
 
-  // Per-reading miles, measured against the previous reading (or the
-  // starting odometer for the first one). Newest first for display.
-  const readingRows = contract.readings
-    .map((r, i) => {
-      const prev =
-        i === 0 ? contract.startOdometer : contract.readings[i - 1].odometer;
-      return { r, delta: r.odometer - prev };
-    })
-    .reverse();
+  // Each trip's end odometer forms the trajectory the projection runs on.
+  const points = tripsToPoints(contract.trips);
+  const stats = computeMileageStats(contract, points);
+  const months = monthlyBreakdown(contract, points);
+  const series = buildMileageSeries(contract, points, stats);
+  const insights = computeTripInsights(contract.trips);
+
+  const tripsDesc = [...contract.trips].reverse();
+  const legs: TripLeg[] = contract.trips
+    .filter(
+      (t) =>
+        t.startLat != null &&
+        t.startLon != null &&
+        t.endLat != null &&
+        t.endLon != null,
+    )
+    .map((t) => ({
+      id: t.id,
+      startLat: t.startLat as number,
+      startLon: t.startLon as number,
+      endLat: t.endLat as number,
+      endLon: t.endLon as number,
+    }));
+
+  // Serialisable trip data for the (client) trips table + detail sheet.
+  const tripData: TripData[] = tripsDesc.map((t) => ({
+    id: t.id,
+    startAt: t.startAt.toISOString(),
+    endAt: t.endAt.toISOString(),
+    durationMin: t.durationMin,
+    startOdo: t.startOdo,
+    endOdo: t.endOdo,
+    distance: t.distance,
+    efficiency: t.efficiency,
+    batteryPct: t.batteryPct,
+    startLat: t.startLat,
+    startLon: t.startLon,
+    endLat: t.endLat,
+    endLon: t.endLon,
+    startUrl: t.startUrl,
+    endUrl: t.endUrl,
+    purpose: t.purpose,
+    driver: t.driver,
+  }));
 
   const monthsRemaining = stats.daysRemaining / (365.25 / 12);
 
@@ -71,10 +123,7 @@ export default async function MileagePage() {
         subtitle={`${contract.label} · ${formatMiles(contract.annualAllowance)} mi/yr × ${contract.termYears}yr · ${format(contract.startDate, "d MMM yyyy")} start`}
         actions={
           <>
-            <AddReadingDialog
-              contractId={contract.id}
-              lastOdometer={stats.currentOdometer}
-            />
+            <ImportTripsDialog contractId={contract.id} />
             <ContractDialog
               triggerVariant="outline"
               initial={{
@@ -90,7 +139,7 @@ export default async function MileagePage() {
             <DeleteContractButton
               id={contract.id}
               label={contract.label}
-              readingCount={contract.readings.length}
+              tripCount={contract.trips.length}
             />
           </>
         }
@@ -165,7 +214,7 @@ export default async function MileagePage() {
 
         <div className="col-span-4 rounded-md border bg-card p-5">
           <p className="label-eyebrow">Your average</p>
-          {stats.hasProjection ? (
+          {stats.hasAverage ? (
             <div className="mt-3 space-y-3.5">
               <Stat
                 label="Per week"
@@ -179,32 +228,111 @@ export default async function MileagePage() {
                 label="Per day"
                 value={`${formatRate(stats.avgDaily, 1)} mi`}
               />
-              <div className="border-t pt-3.5">
+              {insights.tripCount > 0 ? (
                 <Stat
-                  label="Projected at term end"
-                  value={`${formatMiles(stats.projectedTotal)} mi`}
-                  tone={stats.projectedOverUnder > 0 ? "negative" : "positive"}
+                  label="Last 4 weeks"
+                  value={`${formatMiles(insights.recentWeekly)} mi/wk`}
                 />
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  {stats.projectedOverUnder > 0
-                    ? `${formatMiles(stats.projectedOverUnder)} over your ${formatMiles(stats.totalAllowance)} allowance`
-                    : `${formatMiles(Math.abs(stats.projectedOverUnder))} spare under your ${formatMiles(stats.totalAllowance)} allowance`}
+              ) : null}
+              {stats.hasProjection ? (
+                <>
+                  <div className="border-t pt-3.5">
+                    <Stat
+                      label="Projected at term end"
+                      value={`${formatMiles(stats.projectedTotal)} mi`}
+                      tone={
+                        stats.projectedOverUnder > 0 ? "negative" : "positive"
+                      }
+                    />
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {stats.projectedOverUnder > 0
+                        ? `${formatMiles(stats.projectedOverUnder)} over your ${formatMiles(stats.totalAllowance)} allowance`
+                        : `${formatMiles(Math.abs(stats.projectedOverUnder))} spare under your ${formatMiles(stats.totalAllowance)} allowance`}
+                    </p>
+                  </div>
+                  {stats.willExceedWithinTerm && stats.limitDate ? (
+                    <p className="text-[11px] text-negative border-t pt-3">
+                      At this rate you&apos;ll hit the limit by{" "}
+                      <span className="font-medium">
+                        {format(stats.limitDate, "MMM yyyy")}
+                      </span>
+                      .
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-[11px] text-muted-foreground border-t pt-3.5">
+                  About a week of data unlocks the term projection.
                 </p>
-              </div>
-              {stats.willExceedWithinTerm && stats.limitDate ? (
-                <p className="text-[11px] text-negative border-t pt-3">
-                  At this rate you&apos;ll hit the limit by{" "}
-                  <span className="font-medium">
-                    {format(stats.limitDate, "MMM yyyy")}
-                  </span>
-                  .
-                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-[13px] text-muted-foreground mt-3">
+              Import trips to see your average and projection.
+            </p>
+          )}
+        </div>
+      </div>
+
+      {/* Journey map + driving insights */}
+      <div className="grid grid-cols-12 gap-5">
+        <div className="col-span-8 rounded-md border bg-card p-5">
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <p className="label-eyebrow">Journeys</p>
+              <h2 className="text-base font-semibold mt-1">
+                Where you&apos;ve driven
+              </h2>
+            </div>
+            <span className="label-eyebrow tabular-nums">
+              {legs.length} mapped
+            </span>
+          </div>
+          {legs.length > 0 ? (
+            <JourneyMap legs={legs} />
+          ) : (
+            <div className="h-80 flex flex-col items-center justify-center gap-2 rounded-md border border-dashed text-center">
+              <Route className="size-7 text-muted-foreground" />
+              <p className="text-[13px] text-muted-foreground max-w-xs">
+                Import your trip-history CSV to plot your journeys here.
+              </p>
+              <ImportTripsDialog
+                contractId={contract.id}
+                triggerVariant="outline"
+              />
+            </div>
+          )}
+        </div>
+        <div className="col-span-4 rounded-md border bg-card p-5">
+          <p className="label-eyebrow">Driving insights</p>
+          {insights.tripCount > 0 ? (
+            <div className="mt-3 space-y-3.5">
+              <Stat
+                label="Trips"
+                value={insights.tripCount.toLocaleString("en-GB")}
+              />
+              <Stat
+                label="Total distance"
+                value={`${formatMiles(insights.totalDistance)} mi`}
+              />
+              <Stat
+                label="Time driving"
+                value={formatDuration(insights.totalDriveMin)}
+              />
+              <Stat
+                label="Avg trip"
+                value={`${formatRate(insights.avgTripMiles, 1)} mi`}
+              />
+              {insights.avgEfficiency != null ? (
+                <Stat
+                  label="Avg efficiency"
+                  value={`${formatRate(insights.avgEfficiency, 1)} mi/kWh`}
+                />
               ) : null}
             </div>
           ) : (
             <p className="text-[13px] text-muted-foreground mt-3">
-              Add at least a week of readings and your average pace and
-              projection will appear here.
+              Import trips to see distance, drive time and efficiency.
             </p>
           )}
         </div>
@@ -268,65 +396,49 @@ export default async function MileagePage() {
         )}
       </div>
 
-      {/* Readings log */}
+      {/* Recent trips */}
       <div className="rounded-md border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3.5 border-b">
           <div>
-            <p className="label-eyebrow">Log</p>
-            <h2 className="text-base font-semibold mt-1">Odometer readings</h2>
+            <p className="label-eyebrow">Trips</p>
+            <h2 className="text-base font-semibold mt-1">Recent journeys</h2>
           </div>
-          <AddReadingDialog
-            contractId={contract.id}
-            lastOdometer={stats.currentOdometer}
-            triggerVariant="outline"
-          />
+          <ImportTripsDialog contractId={contract.id} triggerVariant="outline" />
         </div>
-        {readingRows.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground py-8 text-center">
-            No readings yet. Add your first to start tracking.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                <TableHead className="h-9">Date</TableHead>
-                <TableHead className="h-9 text-right">Odometer</TableHead>
-                <TableHead className="h-9 text-right">Miles driven</TableHead>
-                <TableHead className="h-9">Notes</TableHead>
-                <TableHead className="h-9" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {readingRows.map(({ r, delta }) => (
-                <TableRow key={r.id}>
-                  <TableCell className="text-[12px] tabular-nums text-muted-foreground whitespace-nowrap">
-                    {format(r.date, "d MMM yyyy")}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums text-[13px]">
-                    {formatMiles(r.odometer)}
-                  </TableCell>
-                  <TableCell
-                    className={`text-right font-mono tabular-nums text-[12px] ${
-                      delta < 0 ? "text-negative" : "text-muted-foreground"
-                    }`}
-                  >
-                    {formatMilesSigned(delta)}
-                  </TableCell>
-                  <TableCell className="text-[12px] text-muted-foreground max-w-xs truncate">
-                    {r.notes ?? ""}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <DeleteReadingButton
-                      id={r.id}
-                      label={format(r.date, "d MMM yyyy")}
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
+        <TripsTable trips={tripData} />
       </div>
+
+      {/* Trip imports */}
+      {tripImports.length > 0 ? (
+        <div className="rounded-md border bg-card overflow-hidden">
+          <div className="px-5 py-3.5 border-b">
+            <p className="label-eyebrow">Data</p>
+            <h2 className="text-base font-semibold mt-1">Trip imports</h2>
+          </div>
+          <ul className="divide-y">
+            {tripImports.map((imp) => (
+              <li
+                key={imp.id}
+                className="flex items-center justify-between gap-3 px-5 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="text-[13px] truncate">{imp.filename}</p>
+                  <p className="text-[11px] text-muted-foreground tabular-nums">
+                    {utcDate.format(imp.importedAt)} · {imp.tripCount} trip
+                    {imp.tripCount === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <DeleteTripImportButton
+                  id={imp.id}
+                  filename={imp.filename}
+                  tripCount={imp.tripCount}
+                />
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
     </div>
   );
 }
@@ -364,8 +476,8 @@ function StatusBanner({
       <div className="rounded-md border bg-muted/40 p-4 flex items-start gap-3">
         <Gauge className="size-4 text-muted-foreground mt-0.5 shrink-0" />
         <p className="text-[13px] text-muted-foreground">
-          Add a couple of weekly readings and YAFA will work out your pace and
-          project whether you&apos;ll stay within the allowance.
+          Keep importing — once there&apos;s about a week of trips, YAFA
+          projects whether you&apos;ll stay within your allowance.
         </p>
       </div>
     );

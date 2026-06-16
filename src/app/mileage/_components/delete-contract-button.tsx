@@ -18,10 +18,10 @@ import { deleteContract } from "../actions";
 interface Props {
   id: string;
   label: string;
-  readingCount: number;
+  tripCount: number;
 }
 
-export function DeleteContractButton({ id, label, readingCount }: Props) {
+export function DeleteContractButton({ id, label, tripCount }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
@@ -55,8 +55,8 @@ export function DeleteContractButton({ id, label, readingCount }: Props) {
         <DialogHeader>
           <DialogTitle>Delete this contract?</DialogTitle>
           <DialogDescription>
-            &ldquo;{label}&rdquo; and its {readingCount} reading
-            {readingCount === 1 ? "" : "s"} will be permanently removed. This
+            &ldquo;{label}&rdquo; and its {tripCount} trip
+            {tripCount === 1 ? "" : "s"} will be permanently removed. This
             can&apos;t be undone.
           </DialogDescription>
         </DialogHeader>

@@ -18,7 +18,7 @@ export interface MileageContractLike {
   termYears: number;
 }
 
-export interface MileageReadingLike {
+export interface OdometerPoint {
   date: Date;
   odometer: number;
 }
@@ -50,7 +50,8 @@ export interface MileageStats {
   sustainableMonthly: number;
 
   // Observed average + projection (only meaningful with enough data).
-  hasProjection: boolean;
+  hasAverage: boolean; // ≥2 points spanning real time
+  hasProjection: boolean; // hasAverage + ~a week of data
   avgDaily: number;
   avgWeekly: number;
   avgMonthly: number;
@@ -80,7 +81,7 @@ export function contractEndDate(startDate: Date, termYears: number): Date {
 
 export function computeMileageStats(
   contract: MileageContractLike,
-  readings: MileageReadingLike[],
+  readings: OdometerPoint[],
 ): MileageStats {
   const { startDate, startOdometer, annualAllowance, termYears } = contract;
 
@@ -110,17 +111,37 @@ export function computeMileageStats(
   const sustainableWeekly = sustainableDaily * DAYS_PER_WEEK;
   const sustainableMonthly = sustainableDaily * DAYS_PER_MONTH;
 
-  // Need at least a week of data and some distance for a stable average.
-  const hasProjection = hasReadings && daysElapsed >= 7 && milesDriven > 0;
-  const avgDaily = daysElapsed > 0 ? milesDriven / daysElapsed : 0;
+  // Observed driving span: from the first recorded reading/trip to the
+  // latest. Rates are measured over THIS — not since the contract start —
+  // so a start date set well before you began logging doesn't dilute the
+  // average toward zero (e.g. 50 miles over 2 logged days shouldn't read as
+  // ~3/wk just because the contract opened months earlier).
+  const firstPoint = sorted.length > 0 ? sorted[0] : null;
+  const observedDays = firstPoint
+    ? Math.max(0, daysDiff(firstPoint.date, asOf))
+    : 0;
+  const observedMiles = firstPoint
+    ? Math.max(0, currentOdometer - firstPoint.odometer)
+    : 0;
+
+  // Need at least two points spanning real time for a rate.
+  const hasAverage = sorted.length >= 2 && observedDays > 0 && observedMiles > 0;
+  const avgDaily = hasAverage ? observedMiles / observedDays : 0;
   const avgWeekly = avgDaily * DAYS_PER_WEEK;
   const avgMonthly = avgDaily * DAYS_PER_MONTH;
-  const projectedTotal = avgDaily * totalDays;
+
+  // Project the rest of the term at the observed rate, on top of the miles
+  // already driven. Needs ~a week of real data before it's meaningful.
+  const hasProjection = hasAverage && observedDays >= 7;
+  const projectedTotal = hasProjection
+    ? milesDriven + avgDaily * daysRemaining
+    : 0;
   const projectedOverUnder = projectedTotal - totalAllowance;
   const daysToLimit = avgDaily > 0 ? remaining / avgDaily : Infinity;
-  const limitDate = Number.isFinite(daysToLimit)
-    ? new Date(asOf.getTime() + daysToLimit * MS_PER_DAY)
-    : null;
+  const limitDate =
+    hasProjection && Number.isFinite(daysToLimit)
+      ? new Date(asOf.getTime() + daysToLimit * MS_PER_DAY)
+      : null;
   const willExceedWithinTerm = limitDate ? limitDate < endDate : false;
 
   const status: MileageStatus = !hasProjection
@@ -148,6 +169,7 @@ export function computeMileageStats(
     sustainableDaily,
     sustainableWeekly,
     sustainableMonthly,
+    hasAverage,
     hasProjection,
     avgDaily,
     avgWeekly,
@@ -206,7 +228,7 @@ function addMonthUTC(ts: number): number {
 // the day-weighted share so short months (and partial ones) compare fairly.
 export function monthlyBreakdown(
   contract: MileageContractLike,
-  readings: MileageReadingLike[],
+  readings: OdometerPoint[],
 ): MonthlyRow[] {
   const { startDate, startOdometer } = contract;
   const sorted = [...readings].sort(
@@ -267,7 +289,7 @@ export interface MileageSeriesPoint {
 // latest reading to term end at the observed average.
 export function buildMileageSeries(
   contract: MileageContractLike,
-  readings: MileageReadingLike[],
+  readings: OdometerPoint[],
   stats: MileageStats,
 ): MileageSeriesPoint[] {
   const { startDate, startOdometer } = contract;
@@ -308,6 +330,118 @@ export function buildMileageSeries(
   }
 
   return points;
+}
+
+export interface TripLike {
+  startAt: Date;
+  endAt: Date;
+  durationMin: number;
+  startOdo: number;
+  endOdo: number;
+  distance: number | null;
+  efficiency: number | null;
+}
+
+// Each trip's end odometer becomes a (date, odometer) point that feeds
+// computeMileageStats / monthlyBreakdown / buildMileageSeries.
+export function tripsToPoints(trips: TripLike[]): OdometerPoint[] {
+  return trips
+    .map((t) => ({ date: t.endAt, odometer: t.endOdo }))
+    .sort((a, b) => a.date.getTime() - b.date.getTime());
+}
+
+export interface TripInsights {
+  tripCount: number;
+  totalDistance: number; // GPS miles (falls back to odometer delta)
+  totalDriveMin: number;
+  avgTripMiles: number;
+  avgEfficiency: number | null; // mi/kWh
+  recentMiles: number; // odometer miles in the trailing window
+  recentWeekly: number;
+  recentMonthly: number;
+  recentWindowDays: number;
+  firstTripAt: Date | null;
+  lastTripAt: Date | null;
+}
+
+const RECENT_WINDOW_DAYS = 28;
+
+export function computeTripInsights(trips: TripLike[]): TripInsights {
+  if (trips.length === 0) {
+    return {
+      tripCount: 0,
+      totalDistance: 0,
+      totalDriveMin: 0,
+      avgTripMiles: 0,
+      avgEfficiency: null,
+      recentMiles: 0,
+      recentWeekly: 0,
+      recentMonthly: 0,
+      recentWindowDays: 0,
+      firstTripAt: null,
+      lastTripAt: null,
+    };
+  }
+
+  const sorted = [...trips].sort(
+    (a, b) => a.startAt.getTime() - b.startAt.getTime(),
+  );
+  const firstTripAt = sorted[0].startAt;
+  const lastTripAt = sorted[sorted.length - 1].endAt;
+
+  let totalDistance = 0;
+  let totalDriveMin = 0;
+  let effSum = 0;
+  let effCount = 0;
+  for (const t of sorted) {
+    const odoDelta = Math.max(0, t.endOdo - t.startOdo);
+    totalDistance += t.distance != null ? t.distance : odoDelta;
+    totalDriveMin += t.durationMin;
+    if (t.efficiency != null) {
+      effSum += t.efficiency;
+      effCount += 1;
+    }
+  }
+
+  // Recent rate: odometer miles within the trailing window, anchored on the
+  // last trip so it reflects the recent driving pattern (not upload recency).
+  const windowAnchor = Math.max(
+    firstTripAt.getTime(),
+    lastTripAt.getTime() - RECENT_WINDOW_DAYS * 86_400_000,
+  );
+  let recentMiles = 0;
+  for (const t of sorted) {
+    if (t.endAt.getTime() >= windowAnchor) {
+      recentMiles += Math.max(0, t.endOdo - t.startOdo);
+    }
+  }
+  const recentWindowDays = Math.max(
+    1,
+    (lastTripAt.getTime() - windowAnchor) / 86_400_000,
+  );
+  const recentDaily = recentMiles / recentWindowDays;
+
+  return {
+    tripCount: sorted.length,
+    totalDistance,
+    totalDriveMin,
+    avgTripMiles: totalDistance / sorted.length,
+    avgEfficiency: effCount > 0 ? effSum / effCount : null,
+    recentMiles,
+    recentWeekly: recentDaily * 7,
+    recentMonthly: recentDaily * (365.25 / 12),
+    recentWindowDays,
+    firstTripAt,
+    lastTripAt,
+  };
+}
+
+export function formatDuration(min: number): string {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
 }
 
 export function formatMiles(n: number): string {

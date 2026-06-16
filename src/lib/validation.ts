@@ -244,11 +244,3 @@ export const mileageContractSchema = z.object({
 });
 
 export type MileageContractInput = z.infer<typeof mileageContractSchema>;
-
-export const mileageReadingSchema = z.object({
-  date: requiredDate("date"),
-  odometer: z.coerce.number().min(0, "Odometer can't be negative"),
-  notes: optionalString,
-});
-
-export type MileageReadingInput = z.infer<typeof mileageReadingSchema>;

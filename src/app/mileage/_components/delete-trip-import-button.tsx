@@ -13,22 +13,23 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { deleteReading } from "../actions";
+import { deleteTripImport } from "../trip-actions";
 
 interface Props {
   id: string;
-  label: string;
+  filename: string;
+  tripCount: number;
 }
 
-export function DeleteReadingButton({ id, label }: Props) {
+export function DeleteTripImportButton({ id, filename, tripCount }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
   function onConfirm() {
     startTransition(async () => {
       try {
-        await deleteReading(id);
-        toast.success("Reading deleted");
+        await deleteTripImport(id);
+        toast.success("Import removed");
         setOpen(false);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to delete");
@@ -43,7 +44,7 @@ export function DeleteReadingButton({ id, label }: Props) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Delete reading ${label}`}
+            aria-label={`Delete import ${filename}`}
             className="text-muted-foreground hover:text-destructive"
           />
         }
@@ -52,9 +53,10 @@ export function DeleteReadingButton({ id, label }: Props) {
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete reading?</DialogTitle>
+          <DialogTitle>Remove this import?</DialogTitle>
           <DialogDescription>
-            The {label} reading will be permanently removed and the metrics
+            The {tripCount} trip{tripCount === 1 ? "" : "s"} from
+            &ldquo;{filename}&rdquo; will be deleted and the mileage metrics
             recalculated.
           </DialogDescription>
         </DialogHeader>
@@ -73,7 +75,7 @@ export function DeleteReadingButton({ id, label }: Props) {
             onClick={onConfirm}
             disabled={pending}
           >
-            {pending ? "Deleting…" : "Delete"}
+            {pending ? "Removing…" : "Remove import"}
           </Button>
         </DialogFooter>
       </DialogContent>

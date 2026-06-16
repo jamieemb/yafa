@@ -246,23 +246,51 @@ model MileageContract {
   notes           String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
-  readings        MileageReading[]
+  trips           CarTrip[]
 
   @@index([active])
 }
 
-// A single odometer reading against a mileage contract. Miles driven in a
-// period is the difference between consecutive odometer values (the first
-// reading is measured against the contract's startOdometer).
-model MileageReading {
-  id         String          @id @default(cuid())
-  contractId String
-  contract   MileageContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  date       DateTime
-  odometer   Float                          // absolute odometer value
-  notes      String?
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+// A batch import of car trip history (one CSV upload). Mirrors
+// StatementImport — deleting it sets its trips' importId to null.
+model TripImport {
+  id         String    @id @default(cuid())
+  filename   String
+  importedAt DateTime  @default(now())
+  tripCount  Int       @default(0)
+  trips      CarTrip[]
+}
 
-  @@index([contractId, date])
+// A single car journey from the vehicle's exported trip history. The
+// odometer (startOdo/endOdo) drives the mileage allowance; distance and
+// efficiency are GPS/EV extras. Start/end coordinates feed the journey map.
+// The unique key dedupes overlapping weekly exports on re-upload.
+model CarTrip {
+  id          String          @id @default(cuid())
+  contractId  String
+  contract    MileageContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  startAt     DateTime
+  endAt       DateTime
+  timeZone    String?
+  durationMin Int             @default(0)
+  startOdo    Float
+  endOdo      Float
+  distance    Float?          // GPS miles
+  efficiency  Float?          // miles per kWh
+  batteryPct  Float?          // electricity usage %
+  startLat    Float?
+  startLon    Float?
+  endLat      Float?
+  endLon      Float?
+  startUrl    String?
+  endUrl      String?
+  purpose     String?
+  driver      String?
+  importId    String?
+  import      TripImport?     @relation(fields: [importId], references: [id], onDelete: SetNull)
+  createdAt   DateTime        @default(now())
+
+  @@unique([contractId, startAt, startOdo, endOdo])
+  @@index([contractId, startAt])
+  @@index([importId])
 }
