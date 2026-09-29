@@ -11,6 +11,7 @@ import Typography from "@mui/material/Typography";
 import CheckRounded from "@mui/icons-material/CheckRounded";
 import CloseRounded from "@mui/icons-material/CloseRounded";
 import { toast } from "@/components/toast";
+import { SwipeableRow } from "@/components/swipeable-row";
 import { formatGBP } from "@/lib/money";
 import { SPEND_CATEGORIES, type SpendCategory } from "@/lib/categories";
 import { categoriseFromReview, dismissTransaction } from "../actions";
@@ -79,6 +80,18 @@ export function ReviewRow({ id, description, dateLabel, sourceLabel, amount }: P
   }
 
   return (
+    // Phones: swipe right to mark reviewed without a category (the same
+    // action as the close button).
+    <SwipeableRow
+      disabled={done || pending}
+      start={{
+        label: "Reviewed",
+        icon: <CheckRounded />,
+        color: "success",
+        onTrigger: dismiss,
+        dismiss: true,
+      }}
+    >
     <Box
       sx={{
         display: "grid",
@@ -201,5 +214,6 @@ export function ReviewRow({ id, description, dateLabel, sourceLabel, amount }: P
         )}
       </Box>
     </Box>
+    </SwipeableRow>
   );
 }

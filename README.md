@@ -26,9 +26,12 @@ Built for one user — assumes deployment behind your LAN/VPN. No auth in v1.
   reminders, meter readings, and PCP/lease mileage tracking with car
   trip CSV import and a journey map.
 - **Mobile first, Material Design 3** — bottom navigation bar and
-  full-screen forms on phones, a navigation drawer on desktop; light,
-  dark or follow-the-system colour schemes generated from one seed
-  colour.
+  full-screen forms on phones, a navigation rail on tablets, a drawer
+  on desktop; light, dark or follow-the-system colour schemes generated
+  from one seed colour.
+- **Installable app** — a PWA with icons, iOS splash screens, offline
+  fallback, swipe-to-act rows, pull to refresh and edge-swipe back. See
+  [`DEPLOY.md`](./DEPLOY.md#install-on-iphone--ipad).
 
 ## Stack
 

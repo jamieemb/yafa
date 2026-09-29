@@ -75,6 +75,16 @@ Reference implementations: `src/app/recurring/*` and `src/app/settings/*`.
 ## Mobile first
 
 - Everything must work at **375px** wide with no horizontal scrolling.
+- Three layouts, switched with CSS so SSR markup is stable: phones (xs)
+  get a top app bar + bottom navigation bar; tablets (sm–md, e.g. iPad
+  portrait) get an 80px navigation rail; desktop (md+) gets the drawer.
+- **Gestures** (touch only, via `@use-gesture/react`; every gesture has a
+  visible equivalent control): `DataList swipe={…}` / `SwipeableRow` for
+  swipe-to-act on rows, `PullToRefresh` (in the shell) re-fetches the
+  page, `EdgeSwipeBack` closes the open dialog or goes back.
+- The app is a **PWA**: `app/manifest.ts`, `public/sw.js` (static assets
+  only, never pages), `scripts/generate-pwa-assets.mjs` for icons and
+  iOS splash screens (`npm run pwa:assets`).
 - Lists are `DataList` with a `mobile` spec (title / meta / value).
 - Filters and secondary controls stack or wrap; use `Box` with
   `display: "grid"` and responsive `gridTemplateColumns`, or `Stack`

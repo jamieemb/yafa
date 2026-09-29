@@ -51,6 +51,8 @@ import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
 import DarkModeOutlined from "@mui/icons-material/DarkModeOutlined";
 import BrightnessAutoOutlined from "@mui/icons-material/BrightnessAutoOutlined";
 import { LogoMark } from "@/components/logo";
+import { EdgeSwipeBack } from "@/components/edge-swipe-back";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { useAppTheme } from "@/components/theme-registry";
 import {
   ALL_NAV_ITEMS,
@@ -61,7 +63,7 @@ import {
   type NavIconKey,
   type NavItem,
 } from "@/components/nav";
-import { APP_BAR_HEIGHT, DRAWER_WIDTH, NAV_BAR_HEIGHT } from "@/lib/theme";
+import { APP_BAR_HEIGHT, DRAWER_WIDTH, NAV_BAR_HEIGHT, RAIL_WIDTH } from "@/lib/theme";
 import type { Theme } from "@/lib/themes";
 
 // Outlined icon at rest, filled when active (M3 navigation guidance).
@@ -128,13 +130,29 @@ export function AppShell({ preference, children }: Props) {
   return (
     <Box sx={{ display: "flex", minHeight: "100dvh" }}>
       <SkipLink />
+      <EdgeSwipeBack />
 
       {/* ── Mobile top app bar ─────────────────────────────────── */}
-      <AppBar position="fixed" sx={{ display: { md: "none" } }}>
+      {/* pt: with a translucent iOS status bar the bar starts under it.
+          On tablets the bar sits to the right of the navigation rail. */}
+      <AppBar
+        position="fixed"
+        sx={{
+          display: { md: "none" },
+          pt: "env(safe-area-inset-top)",
+          left: { xs: 0, sm: RAIL_WIDTH },
+          width: { xs: "100%", sm: `calc(100% - ${RAIL_WIDTH}px)` },
+        }}
+      >
         <Toolbar sx={{ gap: 1.5, px: 2 }}>
-          <Link href="/dashboard" aria-label="YAFA home" style={{ display: "flex" }}>
+          <Box
+            component={Link}
+            href="/dashboard"
+            aria-label="YAFA home"
+            sx={{ display: { xs: "flex", sm: "none" } }}
+          >
             <LogoMark size={28} />
-          </Link>
+          </Box>
           <Typography variant="h4" component="div" noWrap sx={{ flex: 1, fontSize: "1.375rem" }}>
             {current?.label ?? "YAFA"}
           </Typography>
@@ -180,6 +198,53 @@ export function AppShell({ preference, children }: Props) {
         </Box>
       </Drawer>
 
+      {/* ── Tablet navigation rail (sm to md) ─────────────────── */}
+      <Box
+        component="nav"
+        aria-label="Main navigation"
+        sx={{
+          display: { xs: "none", sm: "flex", md: "none" },
+          position: "fixed",
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: RAIL_WIDTH,
+          flexDirection: "column",
+          alignItems: "center",
+          pt: "calc(env(safe-area-inset-top) + 12px)",
+          pb: "calc(env(safe-area-inset-bottom) + 16px)",
+          bgcolor: "m3.surface",
+          zIndex: (t) => t.zIndex.appBar + 1,
+        }}
+      >
+        <Box component={Link} href="/dashboard" aria-label="YAFA home" sx={{ display: "flex", mb: 2.5 }}>
+          <LogoMark size={32} />
+        </Box>
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, width: "100%" }}>
+          {MOBILE_NAV_HREFS.map((href) => {
+            const item = ALL_NAV_ITEMS.find((i) => i.href === href)!;
+            return (
+              <NavBarItem
+                key={href}
+                rail
+                item={item}
+                active={isActivePath(pathname, href)}
+                badge={item.hasBadge ? reviewCount : 0}
+              />
+            );
+          })}
+          <NavBarItem
+            rail
+            item={{ href: "#more", label: "More", icon: "more" }}
+            active={moreOpen || (Boolean(current) && !MOBILE_NAV_HREFS.includes(current!.href as (typeof MOBILE_NAV_HREFS)[number]))}
+            onClick={() => setMoreOpen(true)}
+          />
+        </Box>
+        <Box sx={{ mt: "auto" }}>
+          <ThemeToggle preference={preference} />
+        </Box>
+      </Box>
+
       {/* ── Content ───────────────────────────────────────────── */}
       <Box
         component="main"
@@ -187,24 +252,27 @@ export function AppShell({ preference, children }: Props) {
         sx={{
           flex: 1,
           minWidth: 0,
-          pt: { xs: `${APP_BAR_HEIGHT}px`, md: 0 },
-          pb: { xs: `calc(${NAV_BAR_HEIGHT}px + env(safe-area-inset-bottom))`, md: 0 },
+          pt: { xs: `calc(${APP_BAR_HEIGHT}px + env(safe-area-inset-top))`, md: 0 },
+          pb: { xs: `calc(${NAV_BAR_HEIGHT}px + env(safe-area-inset-bottom))`, sm: 0 },
+          pl: { xs: 0, sm: `${RAIL_WIDTH}px`, md: 0 },
         }}
       >
-        <Container
-          maxWidth="lg"
-          sx={{
-            pt: { xs: 2, sm: 3, md: 4 },
-            // Extra room on phones so a FAB never covers the last row.
-            pb: { xs: 12, sm: 12, md: 4 },
-            px: { xs: 2, sm: 3, md: 4 },
-            display: "flex",
-            flexDirection: "column",
-            gap: { xs: 3, md: 4 },
-          }}
-        >
-          {children}
-        </Container>
+        <PullToRefresh>
+          <Container
+            maxWidth="lg"
+            sx={{
+              pt: { xs: 2, sm: 3, md: 4 },
+              // Extra room on phones so a FAB never covers the last row.
+              pb: { xs: 12, sm: 12, md: 4 },
+              px: { xs: 2, sm: 3, md: 4 },
+              display: "flex",
+              flexDirection: "column",
+              gap: { xs: 3, md: 4 },
+            }}
+          >
+            {children}
+          </Container>
+        </PullToRefresh>
       </Box>
 
       {/* ── Mobile navigation bar ─────────────────────────────── */}
@@ -212,7 +280,7 @@ export function AppShell({ preference, children }: Props) {
         component="nav"
         aria-label="Main navigation"
         sx={{
-          display: { xs: "flex", md: "none" },
+          display: { xs: "flex", sm: "none" },
           position: "fixed",
           left: 0,
           right: 0,
@@ -313,11 +381,14 @@ function NavBarItem({
   active,
   badge = 0,
   onClick,
+  rail = false,
 }: {
   item: NavItem;
   active: boolean;
   badge?: number;
   onClick?: () => void;
+  /** Vertical rail item (tablet) instead of a bottom-bar destination. */
+  rail?: boolean;
 }) {
   const Icon = ICONS[item.icon][active ? 1 : 0];
   const label = item.shortLabel ?? item.label;
@@ -350,15 +421,16 @@ function NavBarItem({
     </>
   );
   const sx = {
-    flex: 1,
+    flex: rail ? "none" : 1,
+    width: rail ? "100%" : undefined,
     minWidth: 0,
     display: "flex",
     flexDirection: "column" as const,
     alignItems: "center",
     justifyContent: "center",
     gap: 0.5,
-    pt: 1.5,
-    pb: 2,
+    pt: rail ? 0.5 : 1.5,
+    pb: rail ? 0.5 : 2,
   };
   if (onClick) {
     return (

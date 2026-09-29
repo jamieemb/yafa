@@ -4,9 +4,11 @@ import Card from "@mui/material/Card";
 import Chip from "@mui/material/Chip";
 import Typography from "@mui/material/Typography";
 import EventAvailableOutlined from "@mui/icons-material/EventAvailableOutlined";
+import AutorenewRounded from "@mui/icons-material/AutorenewRounded";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
 import {
+  advanceDueDate,
   dueStatusFor,
   dueLabel,
   RENEWAL_RECURRENCE_LABELS,
@@ -20,7 +22,7 @@ import { DataList, Meta } from "@/components/data-list";
 import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { RenewalDialog } from "./_components/renewal-dialog";
 import { RenewButton } from "./_components/renew-button";
-import { deleteRenewal } from "./actions";
+import { deleteRenewal, markRenewed } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +188,25 @@ function RenewalCard({ id, title, caption, rows, now, subjectOptions, muted = fa
         rows={rows}
         getKey={(r) => r.id}
         muted={muted ? () => true : undefined}
+        // Phones: swipe right to mark renewed (same as the renew button).
+        swipe={
+          muted
+            ? undefined
+            : (r) => {
+                const next = advanceDueDate(r.dueDate, r.recurrence as RenewalRecurrence);
+                return {
+                  start: {
+                    label: "Renewed",
+                    icon: <AutorenewRounded />,
+                    color: "success",
+                    onTrigger: markRenewed.bind(null, r.id),
+                    successMessage: next
+                      ? `Renewed — next due ${format(next, "d MMM yyyy")}`
+                      : `Archived — ${r.title} was a one-off`,
+                  },
+                };
+              }
+        }
         columns={[
           {
             id: "title",

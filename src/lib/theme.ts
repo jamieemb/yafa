@@ -88,6 +88,7 @@ function paletteFor(s: M3Scheme, mode: "light" | "dark") {
 }
 
 export const DRAWER_WIDTH = 280;
+export const RAIL_WIDTH = 80;
 export const NAV_BAR_HEIGHT = 80;
 export const APP_BAR_HEIGHT = 64;
 

@@ -106,10 +106,10 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         slotProps={{ transition: { onExited: handleExited } }}
         anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
         sx={{
-          // Sit above the mobile navigation bar.
-          bottom: { xs: "calc(88px + env(safe-area-inset-bottom))", md: 24 },
-          left: { xs: 16, md: 24 },
-          right: { xs: 16, md: "auto" },
+          // Above the phone navigation bar; clear of the tablet rail.
+          bottom: { xs: "calc(88px + env(safe-area-inset-bottom))", sm: 24 },
+          left: { xs: 16, sm: 96, md: 24 },
+          right: { xs: 16, sm: "auto" },
         }}
         message={
           current ? (

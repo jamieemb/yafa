@@ -6,6 +6,9 @@ import TableCell from "@mui/material/TableCell";
 import TableHead from "@mui/material/TableHead";
 import TableRow from "@mui/material/TableRow";
 import Typography from "@mui/material/Typography";
+import { SwipeableRow, type SwipeAction } from "@/components/swipeable-row";
+
+export type { SwipeAction };
 
 export interface Column<T> {
   id: string;
@@ -41,7 +44,12 @@ interface Props<T> {
   actions?: (row: T) => ReactNode;
   /** Fade a row (e.g. inactive items). */
   muted?: (row: T) => boolean;
-  /** Optional link target per row (whole mobile card becomes tappable). */
+  /**
+   * Touch swipe actions for the phone cards: `start` is revealed by
+   * swiping right, `end` by swiping left. Pass bound server actions as
+   * `onTrigger`. The same actions must also be present in `actions`.
+   */
+  swipe?: (row: T) => { start?: SwipeAction; end?: SwipeAction } | null | undefined;
   size?: "small" | "medium";
 }
 
@@ -58,6 +66,7 @@ export function DataList<T>({
   mobile,
   actions,
   muted,
+  swipe,
   size = "medium",
 }: Props<T>) {
   return (
@@ -112,9 +121,9 @@ export function DataList<T>({
           const valueSub = mobile.valueSub?.(row);
           const meta = mobile.meta?.(row);
           const rowActions = actions?.(row);
-          return (
+          const swipeActions = swipe?.(row);
+          const card = (
             <Box
-              key={getKey(row)}
               sx={{
                 display: "grid",
                 gridTemplateColumns: "minmax(0, 1fr) auto",
@@ -169,6 +178,13 @@ export function DataList<T>({
                 </Box>
               ) : null}
             </Box>
+          );
+          return swipeActions ? (
+            <SwipeableRow key={getKey(row)} start={swipeActions.start} end={swipeActions.end}>
+              {card}
+            </SwipeableRow>
+          ) : (
+            <Box key={getKey(row)}>{card}</Box>
           );
         })}
       </Box>

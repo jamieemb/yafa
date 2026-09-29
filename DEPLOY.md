@@ -115,6 +115,37 @@ Named volumes (`-v yafa-data:/data`) skip this step entirely — Docker
 manages permissions automatically. Recommended unless you have a specific
 reason to bind-mount.
 
+## Install on iPhone / iPad
+
+YAFA is a Progressive Web App, so it runs as a standalone app from the
+home screen — full screen, its own icon and splash screen, no Safari
+chrome.
+
+1. Serve it over **HTTPS** (see below). Adding to the home screen works
+   over plain HTTP, but the service worker and several web APIs need a
+   secure origin.
+2. Open the site in **Safari** on the device (other iOS browsers can't
+   install web apps).
+3. Tap **Share → Add to Home Screen → Add**.
+
+Launch it from the icon. Long-press the icon for the shortcuts (Review,
+Transactions, Import). If you change the icon or splash images, run
+`node scripts/generate-pwa-assets.mjs` and redeploy; iOS refreshes them
+on the next install.
+
+### HTTPS with Tailscale
+
+If your devices are on a tailnet, Tailscale can terminate TLS for you
+with a real certificate and no ports opened to the internet:
+
+```bash
+tailscale serve --bg 3000
+```
+
+Then browse to `https://<host>.<tailnet>.ts.net`. See the Tailscale
+docs for `tailscale cert` if you'd rather feed the certificate to your
+own reverse proxy.
+
 ## Reverse proxy
 
 The container speaks plain HTTP on `:3000`. Front it with nginx, Caddy,

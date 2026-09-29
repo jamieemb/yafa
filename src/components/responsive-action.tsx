@@ -52,7 +52,8 @@ export function ResponsiveAction({
               display: { xs: "inline-flex", md: "none" },
               position: "fixed",
               right: 16,
-              bottom: "calc(96px + env(safe-area-inset-bottom))",
+              // Above the navigation bar on phones; tablets have a rail instead.
+              bottom: { xs: "calc(96px + env(safe-area-inset-bottom))", sm: 24 },
               zIndex: (t) => t.zIndex.speedDial,
               gap: 1,
             }}
