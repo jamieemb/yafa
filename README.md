@@ -22,14 +22,22 @@ Built for one user — assumes deployment behind your LAN/VPN. No auth in v1.
   (configurable in settings), allocation donut, by-account breakdown,
   upcoming birthdays/events.
 - **People + calendar** for tracking gift budgets by importance tier.
-- **6 themes** — Treasury (warm cream + navy), Dracula, Monokai,
-  Solarized Dark, Nord, Gruvbox Dark.
+- **Life admin** — renewals (MOT, insurance, licences) with due-soon
+  reminders, meter readings, and PCP/lease mileage tracking with car
+  trip CSV import and a journey map.
+- **Mobile first, Material Design 3** — bottom navigation bar and
+  full-screen forms on phones, a navigation drawer on desktop; light,
+  dark or follow-the-system colour schemes generated from one seed
+  colour.
 
 ## Stack
 
-Next.js 16 (App Router) · React 19 · TypeScript · Tailwind 4 ·
-shadcn/ui (on Base UI) · Prisma 7 + SQLite · Zod 4 · Recharts ·
-Server Actions throughout (no REST except a tiny /api/health probe).
+Next.js 16 (App Router) · React 19 · TypeScript · MUI v9 themed as
+Material Design 3 · MUI X Charts · Prisma 7 + SQLite · Zod 4 ·
+Server Actions throughout (no REST except tiny /api/health and
+/api/review-count probes).
+
+UI conventions live in [`docs/DESIGN.md`](./docs/DESIGN.md).
 
 ## Run it
 
@@ -84,15 +92,25 @@ src/
     imports/         CSV upload + history
     calendar/        upcoming birthdays + events
     people/          gift-importance tiers
-    settings/        themes + percentages + gift tiers
+    renewals/        life-admin due dates (MOT, insurance, …)
+    meters/          meter reading log
+    mileage/         PCP / lease mileage allowance + trip import + map
+    settings/        theme + percentages + gift tiers
   components/
-    ui/              shadcn primitives
-    kpi.tsx          shared KPI tile
-    logo.tsx         YAFA wordmark + mark
+    app-shell.tsx    responsive M3 shell: app bar + nav bar / drawer
+    theme-registry.tsx  MUI provider, light/dark/system mode
+    data-list.tsx    table on desktop, cards on phones
+    form-dialog.tsx  full-screen dialog on phones, dialog on desktop
+    kpi.tsx, page-header.tsx, empty-state.tsx, confirm-delete-button.tsx,
+    responsive-action.tsx, toast.tsx, logo.tsx, nav.ts
   lib/
-    importers/       NatWest, Amex, Monzo CSV parsers
+    theme.ts         MUI theme expressing Material 3
+    m3-colors.ts     M3 colour schemes from a seed colour
+    importers/       NatWest, Amex, Monzo, car-trip CSV parsers
     subset-sum.ts    pay-cycle matcher
+    mileage.ts       allowance / pace / projection maths
     settings.ts      typed accessor for the singleton settings row
+docs/DESIGN.md       UI conventions
 prisma/schema.prisma
 ```
 

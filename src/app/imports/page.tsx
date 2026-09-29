@@ -1,22 +1,26 @@
 import { format } from "date-fns";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Typography from "@mui/material/Typography";
+import UploadFileOutlined from "@mui/icons-material/UploadFileOutlined";
 import { prisma } from "@/lib/db";
-import {
-  STATEMENT_SOURCE_LABELS,
-  type StatementSource,
-} from "@/lib/categories";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Kpi } from "@/components/kpi";
+import { STATEMENT_SOURCE_LABELS, type StatementSource } from "@/lib/categories";
+import { PageHeader, SectionHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { ImportForm } from "./_components/import-form";
-import { DeleteImportButton } from "./_components/delete-import-button";
+import { deleteImport } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+type ImportRow = Awaited<ReturnType<typeof prisma.statementImport.findMany>>[number];
+
+function sourceLabel(source: string): string {
+  return STATEMENT_SOURCE_LABELS[source as StatementSource] ?? source;
+}
 
 export default async function ImportsPage() {
   const imports = await prisma.statementImport.findMany({
@@ -28,80 +32,98 @@ export default async function ImportsPage() {
   const totalRows = imports.reduce((acc, i) => acc + i.transactionCount, 0);
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Data</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Imports
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Drop a NatWest, Amex, or Monzo CSV. Duplicates skipped, rules
-            applied automatically.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 min-w-[280px]">
-          <Kpi label="Imports" value={String(totalImports)} />
-          <Kpi label="Rows" value={String(totalRows)} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Data"
+        title="Imports"
+        description="Drop a NatWest, Amex, or Monzo CSV. Duplicates skipped, rules applied automatically."
+      />
+
+      <KpiGrid columns={2}>
+        <Kpi label="Imports" value={String(totalImports)} sub="Most recent 50" />
+        <Kpi label="Rows" value={String(totalRows)} sub="Transactions brought in" />
+      </KpiGrid>
 
       <ImportForm />
 
-      <section>
-        <div className="flex items-end justify-between gap-3 border-b pb-3">
-          <div>
-            <p className="label-eyebrow">Audit</p>
-            <h2 className="text-sm font-semibold mt-0.5">Recent imports</h2>
-          </div>
-        </div>
+      <Box component="section" aria-label="Recent imports">
+        <SectionHeader eyebrow="Audit" title="Recent imports" />
         {imports.length === 0 ? (
-          <div className="mt-5 rounded-md border border-dashed p-12 text-center">
-            <p className="text-sm text-muted-foreground">No imports yet.</p>
-          </div>
+          <EmptyState
+            icon={<UploadFileOutlined fontSize="inherit" />}
+            title="No imports yet"
+            description="Import a statement above and it will be listed here with a count of the transactions it brought in."
+          />
         ) : (
-          <div className="mt-5 rounded-md border bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                  <TableHead className="h-9">Imported</TableHead>
-                  <TableHead className="h-9">Provider</TableHead>
-                  <TableHead className="h-9">File</TableHead>
-                  <TableHead className="h-9 text-right">Transactions</TableHead>
-                  <TableHead className="h-9" />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {imports.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell className="text-muted-foreground tabular-nums text-[12px]">
-                      {format(row.importedAt, "d MMM yy, HH:mm")}
-                    </TableCell>
-                    <TableCell className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {STATEMENT_SOURCE_LABELS[row.source as StatementSource] ??
-                        row.source}
-                    </TableCell>
-                    <TableCell className="font-mono text-[11px]">
-                      {row.filename}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-mono text-[13px]">
-                      {row.transactionCount}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DeleteImportButton
-                        id={row.id}
-                        filename={row.filename}
-                        transactionCount={row.transactionCount}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <Card>
+            <DataList<ImportRow>
+              rows={imports}
+              getKey={(r) => r.id}
+              columns={[
+                {
+                  id: "imported",
+                  header: "Imported",
+                  nowrap: true,
+                  numeric: true,
+                  render: (r) => (
+                    <Typography variant="body2" color="text.secondary" component="span">
+                      {format(r.importedAt, "d MMM yy, HH:mm")}
+                    </Typography>
+                  ),
+                },
+                {
+                  id: "source",
+                  header: "Provider",
+                  nowrap: true,
+                  render: (r) => <Chip size="small" variant="outlined" label={sourceLabel(r.source)} />,
+                },
+                {
+                  id: "file",
+                  header: "File",
+                  render: (r) => (
+                    <Typography variant="body2" component="span" sx={{ overflowWrap: "anywhere" }}>
+                      {r.filename}
+                    </Typography>
+                  ),
+                },
+                {
+                  id: "count",
+                  header: "Transactions",
+                  align: "right",
+                  numeric: true,
+                  render: (r) => (
+                    <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                      {r.transactionCount}
+                    </Typography>
+                  ),
+                },
+              ]}
+              mobile={{
+                title: (r) => r.filename,
+                meta: (r) => (
+                  <Meta>
+                    {sourceLabel(r.source)}
+                    {format(r.importedAt, "d MMM yy, HH:mm")}
+                  </Meta>
+                ),
+                value: (r) => String(r.transactionCount),
+                valueSub: (r) => (r.transactionCount === 1 ? "transaction" : "transactions"),
+              }}
+              actions={(r) => (
+                <ConfirmDeleteButton
+                  label={`Delete import ${r.filename}`}
+                  heading="Delete import?"
+                  description={`This will remove “${r.filename}” and the ${r.transactionCount} transaction${
+                    r.transactionCount === 1 ? "" : "s"
+                  } it brought in. This can't be undone.`}
+                  successMessage="Import deleted"
+                  onConfirm={deleteImport.bind(null, r.id)}
+                />
+              )}
+            />
+          </Card>
         )}
-      </section>
-    </div>
+      </Box>
+    </>
   );
 }
-

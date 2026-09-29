@@ -1,26 +1,37 @@
-import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
-import { Toaster } from "@/components/ui/sonner";
-import { AppSidebar } from "@/components/app-sidebar";
+import type { Metadata, Viewport } from "next";
+import { Roboto } from "next/font/google";
+import InitColorSchemeScript from "@mui/material/InitColorSchemeScript";
+import { AppShell } from "@/components/app-shell";
+import { ThemeRegistry } from "@/components/theme-registry";
+import { ToastProvider } from "@/components/toast";
 import { getSettings } from "@/lib/settings";
-import { isTheme } from "@/lib/themes";
+import { M3_DARK, M3_LIGHT } from "@/lib/m3-colors";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-sans",
+// Roboto (Material's type face), self-hosted by next/font and handed to
+// the MUI theme via the --font-roboto custom property.
+const roboto = Roboto({
+  weight: ["400", "500", "700"],
   subsets: ["latin"],
   display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-  display: "swap",
+  variable: "--font-roboto",
 });
 
 export const metadata: Metadata = {
   title: "YAFA — Yet Another Finance App",
   description: "Personal finance management",
+  applicationName: "YAFA",
+  appleWebApp: { capable: true, title: "YAFA", statusBarStyle: "default" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: M3_LIGHT.surface },
+    { media: "(prefers-color-scheme: dark)", color: M3_DARK.surface },
+  ],
 };
 
 export default async function RootLayout({
@@ -29,34 +40,19 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const settings = await getSettings();
-  const theme = isTheme(settings.theme) ? settings.theme : "treasury";
-  // The default treasury palette lives on `:root`, so we only need a
-  // class for the non-default themes.
-  const themeClass = theme === "treasury" ? "" : `theme-${theme}`;
-
-  // Detect dark themes so toaster matches the surface — sonner's
-  // `theme` prop drives whether the toast surface is dark or light.
-  const isDarkTheme = theme !== "treasury";
+  const preference = settings.theme;
 
   return (
-    <html
-      lang="en"
-      className={`${inter.variable} ${jetbrainsMono.variable} ${themeClass} h-full`}
-    >
-      <body className="min-h-full bg-background text-foreground font-sans">
-        <div className="flex min-h-screen">
-          <AppSidebar />
-          <main className="flex-1 min-w-0">
-            <div className="mx-auto max-w-7xl px-8 py-8 lg:px-10 lg:py-10">
-              {children}
-            </div>
-          </main>
-        </div>
-        <Toaster
-          theme={isDarkTheme ? "dark" : "light"}
-          richColors
-          position="top-right"
-        />
+    <html lang="en" className={roboto.variable} suppressHydrationWarning>
+      <body>
+        {/* Sets data-mui-color-scheme before first paint so "system"
+            and dark preferences never flash light. */}
+        <InitColorSchemeScript defaultMode={preference} />
+        <ThemeRegistry preference={preference}>
+          <ToastProvider>
+            <AppShell preference={preference}>{children}</AppShell>
+          </ToastProvider>
+        </ThemeRegistry>
       </body>
     </html>
   );

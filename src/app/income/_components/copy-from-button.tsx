@@ -1,9 +1,9 @@
 "use client";
 
 import { useTransition } from "react";
-import { Copy } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import Button from "@mui/material/Button";
+import ContentCopyOutlined from "@mui/icons-material/ContentCopyOutlined";
+import { toast } from "@/components/toast";
 import { copyEntriesFromMonth } from "../actions";
 
 interface Props {
@@ -12,11 +12,8 @@ interface Props {
   sourceLabel: string;
 }
 
-export function CopyFromButton({
-  targetMonthIso,
-  sourceMonthIso,
-  sourceLabel,
-}: Props) {
+/** Clones last month's income entries into the month being viewed. */
+export function CopyFromButton({ targetMonthIso, sourceMonthIso, sourceLabel }: Props) {
   const [pending, startTransition] = useTransition();
 
   function onCopy() {
@@ -24,26 +21,26 @@ export function CopyFromButton({
       try {
         const cloned = await copyEntriesFromMonth(targetMonthIso, sourceMonthIso);
         if (cloned === 0) {
-          toast.info("Nothing new to copy — those entries already exist.");
+          toast.info("Nothing new to copy", "Those entries already exist this month.");
         } else {
           toast.success(
-            `Copied ${cloned} entr${cloned === 1 ? "y" : "ies"} from ${sourceLabel}`,
+            `Copied ${cloned} entr${cloned === 1 ? "y" : "ies"}`,
+            `From ${sourceLabel} — add the paid dates once the money lands.`,
           );
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Copy failed");
+        toast.error("Copy failed", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
   return (
     <Button
-      type="button"
-      variant="outline"
+      variant="tonal"
+      startIcon={<ContentCopyOutlined />}
       onClick={onCopy}
       disabled={pending}
     >
-      <Copy className="size-3.5" />
       {pending ? "Copying…" : `Copy from ${sourceLabel}`}
     </Button>
   );

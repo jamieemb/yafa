@@ -1,35 +1,41 @@
 "use client";
 
-import { useTransition } from "react";
-import { toast } from "sonner";
-import { Switch } from "@/components/ui/switch";
+import { useOptimistic, useTransition } from "react";
+import Switch from "@mui/material/Switch";
+import Tooltip from "@mui/material/Tooltip";
+import { toast } from "@/components/toast";
 import { setRecurringItemActive } from "../actions";
 
 interface Props {
   id: string;
   active: boolean;
+  name: string;
 }
 
-export function ActiveToggle({ id, active }: Props) {
+export function ActiveToggle({ id, active, name }: Props) {
   const [pending, startTransition] = useTransition();
+  const [optimistic, setOptimistic] = useOptimistic(active);
 
   function onChange(next: boolean) {
     startTransition(async () => {
+      setOptimistic(next);
       try {
         await setRecurringItemActive(id, next);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to update");
+        toast.error("Could not update", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
   return (
-    <Switch
-      checked={active}
-      onCheckedChange={onChange}
-      disabled={pending}
-      size="sm"
-      aria-label="Toggle active"
-    />
+    <Tooltip title={optimistic ? "Active — tap to pause" : "Paused — tap to activate"}>
+      <Switch
+        checked={optimistic}
+        onChange={(_, v) => onChange(v)}
+        disabled={pending}
+        size="small"
+        slotProps={{ input: { "aria-label": `${name} active` } }}
+      />
+    </Tooltip>
   );
 }

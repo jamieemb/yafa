@@ -1,32 +1,31 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { useState } from "react";
-import {
-  ChevronRight,
-  ExternalLink,
-  Route,
-  Gauge,
-  Clock,
-  Zap,
-  Battery,
-} from "lucide-react";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { formatMiles, formatRate, formatDuration } from "@/lib/mileage";
+import { useState, type ReactNode } from "react";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Card from "@mui/material/Card";
+import Divider from "@mui/material/Divider";
+import Drawer from "@mui/material/Drawer";
+import IconButton from "@mui/material/IconButton";
+import LinearProgress from "@mui/material/LinearProgress";
+import Link from "@mui/material/Link";
+import Stack from "@mui/material/Stack";
+import SwipeableDrawer from "@mui/material/SwipeableDrawer";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+import ArrowForwardRounded from "@mui/icons-material/ArrowForwardRounded";
+import BatteryChargingFullOutlined from "@mui/icons-material/BatteryChargingFullOutlined";
+import BoltOutlined from "@mui/icons-material/BoltOutlined";
+import CloseRounded from "@mui/icons-material/CloseRounded";
+import LaunchOutlined from "@mui/icons-material/LaunchOutlined";
+import MapOutlined from "@mui/icons-material/MapOutlined";
+import RouteOutlined from "@mui/icons-material/RouteOutlined";
+import ScheduleOutlined from "@mui/icons-material/ScheduleOutlined";
+import SpeedOutlined from "@mui/icons-material/SpeedOutlined";
+import { DataList, Meta } from "@/components/data-list";
+import { formatDuration, formatMiles, formatRate } from "@/lib/mileage";
 import { JourneyMap, type TripLeg } from "./journey-map";
 
 export interface TripData {
@@ -65,94 +64,269 @@ const utcTime = new Intl.DateTimeFormat("en-GB", {
 const fmtDate = (iso: string) => utcDate.format(new Date(iso));
 const fmtTime = (iso: string) => utcTime.format(new Date(iso));
 
+const odoMiles = (t: TripData) => Math.max(0, t.endOdo - t.startOdo);
+// GPS distance when the export has it, otherwise the odometer delta.
+const distanceLabel = (t: TripData) =>
+  t.distance != null ? formatRate(t.distance, 1) : formatMiles(odoMiles(t));
+
+const PAGE_SIZE = 20;
+
 export function TripsTable({ trips }: { trips: TripData[] }) {
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<TripData | null>(null);
-  const shown = trips.slice(0, 20);
 
   if (trips.length === 0) {
     return (
-      <p className="text-[13px] text-muted-foreground py-8 text-center">
-        No trips imported yet. Use &ldquo;Import trips&rdquo; to upload your
-        weekly CSV.
-      </p>
+      <Typography variant="body2" color="text.secondary" sx={{ py: 4, px: 2, textAlign: "center" }}>
+        No trips imported yet. Use “Import trips” to upload your weekly CSV.
+      </Typography>
     );
   }
 
+  const shown = trips.slice(0, limit);
+  const remaining = trips.length - shown.length;
+
   return (
     <>
-      <Table>
-        <TableHeader>
-          <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            <TableHead className="h-9">Date</TableHead>
-            <TableHead className="h-9">Time</TableHead>
-            <TableHead className="h-9 text-right">Distance</TableHead>
-            <TableHead className="h-9 text-right">Duration</TableHead>
-            <TableHead className="h-9 text-right">End ODO</TableHead>
-            <TableHead className="h-9 text-right">mi/kWh</TableHead>
-            <TableHead className="h-9" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {shown.map((t) => (
-            <TableRow
-              key={t.id}
-              onClick={() => setSelected(t)}
-              className="cursor-pointer hover:bg-muted/40"
-            >
-              <TableCell className="text-[12px] tabular-nums text-muted-foreground whitespace-nowrap">
-                {fmtDate(t.startAt)}
-              </TableCell>
-              <TableCell className="text-[12px] tabular-nums text-muted-foreground whitespace-nowrap">
+      <DataList<TripData>
+        rows={shown}
+        getKey={(t) => t.id}
+        columns={[
+          {
+            id: "start",
+            header: "Start",
+            nowrap: true,
+            render: (t) => (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                  {fmtDate(t.startAt)}
+                </Typography>
+                <Typography variant="caption" color="text.secondary" className="tabular" component="p">
+                  {fmtTime(t.startAt)}–{fmtTime(t.endAt)}
+                </Typography>
+              </>
+            ),
+          },
+          {
+            id: "duration",
+            header: "Duration",
+            numeric: true,
+            nowrap: true,
+            render: (t) => formatDuration(t.durationMin),
+          },
+          { id: "route", header: "Route", nowrap: true, render: (t) => <RouteCell trip={t} /> },
+          {
+            id: "odometer",
+            header: "Odometer",
+            align: "right",
+            numeric: true,
+            nowrap: true,
+            render: (t) => `${formatMiles(t.startOdo)} → ${formatMiles(t.endOdo)}`,
+          },
+          {
+            id: "distance",
+            header: "Distance",
+            align: "right",
+            numeric: true,
+            render: (t) => (
+              <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                {distanceLabel(t)}
+              </Typography>
+            ),
+          },
+          {
+            id: "efficiency",
+            header: "mi/kWh",
+            align: "right",
+            numeric: true,
+            render: (t) => (t.efficiency != null ? formatRate(t.efficiency, 1) : "—"),
+          },
+          {
+            id: "battery",
+            header: "Battery",
+            align: "right",
+            numeric: true,
+            render: (t) => (t.batteryPct != null ? `${formatRate(t.batteryPct, 0)}%` : "—"),
+          },
+          { id: "meta", header: "Purpose / driver", render: (t) => <PurposeDriver trip={t} /> },
+        ]}
+        mobile={{
+          title: (t) => (
+            <>
+              {fmtDate(t.startAt)}{" "}
+              <Typography component="span" variant="body2" color="text.secondary" className="tabular">
                 {fmtTime(t.startAt)}–{fmtTime(t.endAt)}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-[13px]">
-                {t.distance != null
-                  ? formatRate(t.distance, 1)
-                  : formatMiles(Math.max(0, t.endOdo - t.startOdo))}
-              </TableCell>
-              <TableCell className="text-right tabular-nums text-[12px] text-muted-foreground">
-                {formatDuration(t.durationMin)}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-[13px]">
-                {formatMiles(t.endOdo)}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-[12px] text-muted-foreground">
-                {t.efficiency != null ? formatRate(t.efficiency, 1) : "—"}
-              </TableCell>
-              <TableCell className="text-right">
-                <ChevronRight className="size-4 text-muted-foreground" />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      {trips.length > 20 ? (
-        <p className="px-5 py-2 text-[11px] text-muted-foreground border-t">
-          Showing the 20 most recent of {trips.length} trips.
-        </p>
+              </Typography>
+            </>
+          ),
+          meta: (t) => (
+            <Meta>
+              {formatDuration(t.durationMin)}
+              {t.distance != null ? `${formatRate(t.distance, 1)} mi GPS` : null}
+              {t.efficiency != null ? `${formatRate(t.efficiency, 1)} mi/kWh` : null}
+            </Meta>
+          ),
+          value: (t) => `${formatMiles(odoMiles(t))} mi`,
+          valueSub: (t) => `odo ${formatMiles(t.endOdo)}`,
+        }}
+        actions={(t) => (
+          <Tooltip title="Trip details">
+            <IconButton
+              size="small"
+              aria-label={`Details for the trip on ${fmtDate(t.startAt)}`}
+              onClick={() => setSelected(t)}
+            >
+              <MapOutlined fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        )}
+      />
+
+      {remaining > 0 ? (
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "center",
+            p: 1.5,
+            borderTop: "1px solid",
+            borderColor: "divider",
+          }}
+        >
+          <Button variant="text" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+            Show {Math.min(PAGE_SIZE, remaining)} more of {remaining}
+          </Button>
+        </Box>
       ) : null}
 
-      <Sheet
-        open={selected !== null}
-        onOpenChange={(open) => {
-          if (!open) setSelected(null);
-        }}
-      >
-        <SheetContent className="sm:max-w-md flex flex-col gap-0 p-0 overflow-y-auto">
-          {selected ? <TripDetail trip={selected} /> : null}
-        </SheetContent>
-      </Sheet>
+      <TripDetailPanel trip={selected} onClose={() => setSelected(null)} />
     </>
   );
 }
 
-function TripDetail({ trip }: { trip: TripData }) {
-  const miles = Math.max(0, trip.endOdo - trip.startOdo);
+// ── Table cells ────────────────────────────────────────────────────────
+
+function PlaceLink({
+  label,
+  url,
+  lat,
+  lon,
+}: {
+  label: string;
+  url: string | null;
+  lat: number | null;
+  lon: number | null;
+}) {
+  if (url) {
+    return (
+      <Link
+        href={url}
+        target="_blank"
+        rel="noreferrer"
+        underline="hover"
+        variant="body2"
+        aria-label={`Open trip ${label.toLowerCase()} location in Google Maps`}
+        sx={{ display: "inline-flex", alignItems: "center", gap: 0.25 }}
+      >
+        {label}
+        <LaunchOutlined sx={{ fontSize: 14 }} aria-hidden />
+      </Link>
+    );
+  }
+  if (lat != null && lon != null) {
+    return (
+      <Typography variant="body2" component="span" color="text.secondary" className="tabular">
+        {lat.toFixed(3)}, {lon.toFixed(3)}
+      </Typography>
+    );
+  }
+  return (
+    <Typography variant="body2" component="span" color="text.secondary">
+      —
+    </Typography>
+  );
+}
+
+function RouteCell({ trip }: { trip: TripData }) {
+  const has = trip.startUrl || trip.endUrl || trip.startLat != null || trip.endLat != null;
+  if (!has) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Stack direction="row" spacing={0.75} sx={{ alignItems: "center" }}>
+      <PlaceLink label="Start" url={trip.startUrl} lat={trip.startLat} lon={trip.startLon} />
+      <ArrowForwardRounded sx={{ fontSize: 14, color: "text.secondary" }} aria-hidden />
+      <PlaceLink label="End" url={trip.endUrl} lat={trip.endLat} lon={trip.endLon} />
+    </Stack>
+  );
+}
+
+const purposeOf = (t: TripData) => (t.purpose && t.purpose !== "Undefined" ? t.purpose : null);
+const driverOf = (t: TripData) => (t.driver && t.driver !== "Unknown" ? t.driver : null);
+
+function PurposeDriver({ trip }: { trip: TripData }) {
+  const purpose = purposeOf(trip);
+  const driver = driverOf(trip);
+  if (!purpose && !driver) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        —
+      </Typography>
+    );
+  }
+  return (
+    <>
+      {purpose ? <Typography variant="body2">{purpose}</Typography> : null}
+      {driver ? (
+        <Typography variant="caption" color="text.secondary" component="p">
+          {driver}
+        </Typography>
+      ) : null}
+    </>
+  );
+}
+
+// ── Detail panel ───────────────────────────────────────────────────────
+
+function TripDetailPanel({ trip, onClose }: { trip: TripData | null; onClose: () => void }) {
+  const theme = useTheme();
+  const phone = useMediaQuery(theme.breakpoints.down("md"));
+  const open = trip !== null;
+  const content = trip ? <TripDetail trip={trip} onClose={onClose} /> : null;
+
+  if (phone) {
+    return (
+      <SwipeableDrawer
+        anchor="bottom"
+        open={open}
+        onClose={onClose}
+        onOpen={() => {}}
+        disableSwipeToOpen
+        slotProps={{ paper: { sx: { maxHeight: "92dvh" } } }}
+      >
+        {content}
+      </SwipeableDrawer>
+    );
+  }
+  return (
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      slotProps={{ paper: { sx: { width: 440, maxWidth: "100vw" } } }}
+    >
+      {content}
+    </Drawer>
+  );
+}
+
+function TripDetail({ trip, onClose }: { trip: TripData; onClose: () => void }) {
+  const miles = odoMiles(trip);
   const hasCoords =
-    trip.startLat != null &&
-    trip.startLon != null &&
-    trip.endLat != null &&
-    trip.endLon != null;
+    trip.startLat != null && trip.startLon != null && trip.endLat != null && trip.endLon != null;
   const leg: TripLeg | null = hasCoords
     ? {
         id: trip.id,
@@ -163,117 +337,133 @@ function TripDetail({ trip }: { trip: TripData }) {
       }
     : null;
   const avgMph =
-    trip.distance != null && trip.durationMin > 0
-      ? trip.distance / (trip.durationMin / 60)
-      : null;
-  const showMeta =
-    (trip.purpose && trip.purpose !== "Undefined") ||
-    (trip.driver && trip.driver !== "Unknown");
+    trip.distance != null && trip.durationMin > 0 ? trip.distance / (trip.durationMin / 60) : null;
+  const purpose = purposeOf(trip);
+  const driver = driverOf(trip);
 
   return (
-    <>
-      <SheetHeader className="px-5 py-4 border-b">
-        <SheetTitle>{fmtDate(trip.startAt)}</SheetTitle>
-        <SheetDescription>
-          {fmtTime(trip.startAt)} – {fmtTime(trip.endAt)} ·{" "}
-          {formatDuration(trip.durationMin)}
-        </SheetDescription>
-      </SheetHeader>
+    <Box sx={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, pt: 2, pb: 1 }}>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="h5" component="h2">
+            {fmtDate(trip.startAt)}
+          </Typography>
+          <Typography variant="body2" color="text.secondary" className="tabular">
+            {fmtTime(trip.startAt)} – {fmtTime(trip.endAt)} · {formatDuration(trip.durationMin)}
+          </Typography>
+        </Box>
+        <Tooltip title="Close">
+          <IconButton aria-label="Close" onClick={onClose}>
+            <CloseRounded />
+          </IconButton>
+        </Tooltip>
+      </Box>
 
-      <div className="p-5 space-y-5">
+      <Stack
+        spacing={2.5}
+        sx={{ px: 2, pt: 1, pb: "calc(16px + env(safe-area-inset-bottom))", overflowY: "auto" }}
+      >
         {leg ? (
-          <JourneyMap legs={[leg]} variant="detail" heightClass="h-52" />
+          <JourneyMap legs={[leg]} variant="detail" height={220} />
         ) : (
-          <div className="h-52 rounded-md border border-dashed flex items-center justify-center text-[12px] text-muted-foreground">
-            No location recorded for this trip.
-          </div>
+          <Box
+            sx={{
+              height: 220,
+              borderRadius: 3,
+              border: "1px dashed",
+              borderColor: "m3.outline",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              px: 2,
+              textAlign: "center",
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              No location recorded for this trip.
+            </Typography>
+          </Box>
         )}
 
-        <div className="grid grid-cols-2 gap-3">
+        <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
           <DetailTile
-            icon={<Route className="size-3" />}
+            icon={<RouteOutlined />}
             label="Distance"
             value={trip.distance != null ? `${formatRate(trip.distance, 1)} mi` : "—"}
           />
           <DetailTile
-            icon={<Gauge className="size-3" />}
+            icon={<SpeedOutlined />}
             label="Odometer"
             value={`${formatMiles(miles)} mi`}
             sub={`${formatMiles(trip.startOdo)} → ${formatMiles(trip.endOdo)}`}
           />
           <DetailTile
-            icon={<Clock className="size-3" />}
+            icon={<ScheduleOutlined />}
             label="Duration"
             value={formatDuration(trip.durationMin)}
             sub={avgMph != null ? `${formatRate(avgMph, 0)} mph avg` : undefined}
           />
           <DetailTile
-            icon={<Zap className="size-3" />}
+            icon={<BoltOutlined />}
             label="Efficiency"
-            value={
-              trip.efficiency != null
-                ? `${formatRate(trip.efficiency, 1)} mi/kWh`
-                : "—"
-            }
+            value={trip.efficiency != null ? `${formatRate(trip.efficiency, 1)} mi/kWh` : "—"}
           />
-        </div>
+        </Box>
 
         {trip.batteryPct != null ? (
-          <div className="space-y-1.5">
-            <div className="flex items-baseline justify-between text-[12px]">
-              <span className="text-muted-foreground flex items-center gap-1.5">
-                <Battery className="size-3.5" /> Battery used
-              </span>
-              <span className="font-mono tabular-nums">
+          <Box>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", mb: 0.75 }}>
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ display: "inline-flex", alignItems: "center", gap: 0.75 }}
+              >
+                <BatteryChargingFullOutlined sx={{ fontSize: 18 }} /> Battery used
+              </Typography>
+              <Typography variant="body2" className="tabular">
                 {formatRate(trip.batteryPct, 0)}%
-              </span>
-            </div>
-            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-              <div
-                className="h-full bg-primary"
-                style={{
-                  width: `${Math.min(100, Math.max(0, trip.batteryPct))}%`,
-                }}
-              />
-            </div>
-          </div>
+              </Typography>
+            </Box>
+            <LinearProgress
+              variant="determinate"
+              value={Math.min(100, Math.max(0, trip.batteryPct))}
+              sx={{ height: 6, borderRadius: 3 }}
+            />
+          </Box>
         ) : null}
 
-        <div className="space-y-2.5 border-t pt-4">
-          <LocationRow
-            color="var(--primary)"
-            label="Start"
-            lat={trip.startLat}
-            lon={trip.startLon}
-            url={trip.startUrl}
-          />
-          <LocationRow
-            color="var(--accent)"
-            label="End"
-            lat={trip.endLat}
-            lon={trip.endLon}
-            url={trip.endUrl}
-          />
-        </div>
+        <Divider />
 
-        {showMeta ? (
-          <div className="border-t pt-4 grid grid-cols-2 gap-3 text-[12px]">
-            {trip.purpose && trip.purpose !== "Undefined" ? (
-              <div>
-                <p className="text-muted-foreground">Purpose</p>
-                <p>{trip.purpose}</p>
-              </div>
-            ) : null}
-            {trip.driver && trip.driver !== "Unknown" ? (
-              <div>
-                <p className="text-muted-foreground">Driver</p>
-                <p>{trip.driver}</p>
-              </div>
-            ) : null}
-          </div>
+        <Stack spacing={1}>
+          <LocationRow color="m3.primary" label="Start" lat={trip.startLat} lon={trip.startLon} url={trip.startUrl} />
+          <LocationRow color="m3.tertiary" label="End" lat={trip.endLat} lon={trip.endLon} url={trip.endUrl} />
+        </Stack>
+
+        {purpose || driver ? (
+          <>
+            <Divider />
+            <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+              {purpose ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" component="p">
+                    Purpose
+                  </Typography>
+                  <Typography variant="body2">{purpose}</Typography>
+                </Box>
+              ) : null}
+              {driver ? (
+                <Box>
+                  <Typography variant="caption" color="text.secondary" component="p">
+                    Driver
+                  </Typography>
+                  <Typography variant="body2">{driver}</Typography>
+                </Box>
+              ) : null}
+            </Box>
+          </>
         ) : null}
-      </div>
-    </>
+      </Stack>
+    </Box>
   );
 }
 
@@ -289,18 +479,24 @@ function DetailTile({
   sub?: string;
 }) {
   return (
-    <div className="rounded-md border bg-muted/30 p-3">
-      <div className="flex items-center gap-1.5 text-muted-foreground">
+    <Card variant="filled" sx={{ p: 1.5, minWidth: 0 }}>
+      <Box
+        sx={{ display: "flex", alignItems: "center", gap: 0.75, color: "text.secondary", "& svg": { fontSize: 18 } }}
+      >
         {icon}
-        <span className="label-eyebrow">{label}</span>
-      </div>
-      <p className="font-mono tabular-nums text-[15px] mt-1.5">{value}</p>
+        <Typography variant="overline" component="span" sx={{ lineHeight: 1.4 }}>
+          {label}
+        </Typography>
+      </Box>
+      <Typography variant="body1" className="tabular" sx={{ mt: 0.75, fontWeight: 500 }}>
+        {value}
+      </Typography>
       {sub ? (
-        <p className="text-[11px] text-muted-foreground mt-0.5 tabular-nums">
+        <Typography variant="caption" color="text.secondary" className="tabular" component="p" sx={{ mt: 0.25 }}>
           {sub}
-        </p>
+        </Typography>
       ) : null}
-    </div>
+    </Card>
   );
 }
 
@@ -319,28 +515,30 @@ function LocationRow({
 }) {
   if (lat == null || lon == null) return null;
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="flex items-center gap-2 text-[12px] min-w-0">
-        <span
-          className="size-2 rounded-full shrink-0"
-          style={{ background: color }}
-        />
-        <span className="font-medium">{label}</span>
-        <span className="text-muted-foreground tabular-nums truncate">
+    <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1.5 }}>
+      <Box sx={{ display: "flex", alignItems: "center", gap: 1, minWidth: 0 }}>
+        <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: color, flexShrink: 0 }} />
+        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+          {label}
+        </Typography>
+        <Typography variant="body2" color="text.secondary" className="tabular" noWrap>
           {lat.toFixed(4)}, {lon.toFixed(4)}
-        </span>
-      </span>
+        </Typography>
+      </Box>
       {url ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-muted-foreground hover:text-primary inline-flex shrink-0"
-          aria-label={`Open ${label} in Google Maps`}
-        >
-          <ExternalLink className="size-3.5" />
-        </a>
+        <Tooltip title={`Open ${label.toLowerCase()} in Google Maps`}>
+          <IconButton
+            size="small"
+            component="a"
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${label} in Google Maps`}
+          >
+            <LaunchOutlined fontSize="small" />
+          </IconButton>
+        </Tooltip>
       ) : null}
-    </div>
+    </Box>
   );
 }

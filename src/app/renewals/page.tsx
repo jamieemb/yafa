@@ -1,5 +1,9 @@
 import { format } from "date-fns";
-import { CalendarClock } from "lucide-react";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Typography from "@mui/material/Typography";
+import EventAvailableOutlined from "@mui/icons-material/EventAvailableOutlined";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
 import {
@@ -9,25 +13,23 @@ import {
   type DueStatus,
   type RenewalRecurrence,
 } from "@/lib/admin";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Kpi } from "@/components/kpi";
+import { PageHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { RenewalDialog } from "./_components/renewal-dialog";
-import { DeleteRenewalButton } from "./_components/delete-renewal-button";
 import { RenewButton } from "./_components/renew-button";
+import { deleteRenewal } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const STATUS_PILL: Record<DueStatus, string> = {
-  overdue: "bg-negative/10 text-negative",
-  "due-soon": "bg-primary/10 text-primary",
-  upcoming: "bg-muted text-muted-foreground",
+type Renewal = Awaited<ReturnType<typeof prisma.renewal.findMany>>[number];
+
+const STATUS_COLOR: Record<DueStatus, string> = {
+  overdue: "error.main",
+  "due-soon": "warning.main",
+  upcoming: "text.secondary",
 };
 
 const STATUS_LABEL: Record<DueStatus, string> = {
@@ -35,6 +37,11 @@ const STATUS_LABEL: Record<DueStatus, string> = {
   "due-soon": "Due soon",
   upcoming: "Upcoming",
 };
+
+// "in 12 days" → "In 12 days" for use as a standalone label.
+function sentence(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
 
 export default async function RenewalsPage() {
   const renewals = await prisma.renewal.findMany({
@@ -47,17 +54,14 @@ export default async function RenewalsPage() {
 
   // Distinct subjects for the dialog's autocomplete.
   const subjectOptions = Array.from(
-    new Set(
-      renewals
-        .map((r) => r.subject)
-        .filter((v): v is string => Boolean(v)),
-    ),
+    new Set(renewals.map((r) => r.subject).filter((v): v is string => Boolean(v))),
   ).sort();
 
   // KPIs over the active set.
+  let overdueCount = 0;
   let dueSoonCount = 0;
   let dueSoonCost = 0;
-  let overdueCount = 0;
+  let upcomingCount = 0;
   for (const r of active) {
     const { status } = dueStatusFor(r.dueDate, r.reminderDays, now);
     if (status === "overdue") overdueCount += 1;
@@ -65,177 +69,215 @@ export default async function RenewalsPage() {
       dueSoonCount += 1;
       dueSoonCost += r.cost ?? 0;
     }
+    if (status === "upcoming") upcomingCount += 1;
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Life admin</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Renewals
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Insurance, MOT, service, tax and other dated obligations — sorted
-            by what&apos;s next.
-          </p>
-        </div>
-        <div className="flex items-end gap-3">
-          <div className="grid grid-cols-3 gap-3 min-w-[400px]">
-            <Kpi label="Tracked" value={String(active.length)} />
-            <Kpi
-              label="Due soon"
-              value={String(dueSoonCount)}
-              sub={dueSoonCost > 0 ? formatGBP(dueSoonCost) : undefined}
-              tone={dueSoonCount > 0 ? "primary" : "muted"}
-            />
-            <Kpi
-              label="Overdue"
-              value={String(overdueCount)}
-              tone={overdueCount > 0 ? "negative" : "muted"}
-            />
-          </div>
-          <RenewalDialog subjectOptions={subjectOptions} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Life admin"
+        title="Renewals"
+        description="Insurance, MOT, service, tax and other dated obligations — sorted by what's next."
+        actions={<RenewalDialog subjectOptions={subjectOptions} />}
+      />
+
+      <KpiGrid columns={3}>
+        <Kpi
+          label="Overdue"
+          value={String(overdueCount)}
+          sub={overdueCount > 0 ? "Needs attention" : "Nothing overdue"}
+          tone={overdueCount > 0 ? "negative" : "muted"}
+        />
+        <Kpi
+          label="Due soon"
+          value={String(dueSoonCount)}
+          sub={dueSoonCost > 0 ? `${formatGBP(dueSoonCost)} to pay` : "Inside reminder window"}
+          tone={dueSoonCount > 0 ? "warning" : "muted"}
+        />
+        <Kpi label="Upcoming" value={String(upcomingCount)} sub={`of ${active.length} tracked`} />
+      </KpiGrid>
 
       {active.length === 0 ? (
-        <div className="rounded-md border border-dashed p-12 flex flex-col items-center gap-3 text-center">
-          <CalendarClock className="size-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            No renewals tracked yet. Add your insurance, MOT, service or tax
-            dates to get reminders.
-          </p>
-        </div>
+        <EmptyState
+          icon={<EventAvailableOutlined fontSize="inherit" />}
+          title="No renewals tracked yet"
+          description="Add your insurance, MOT, service or tax dates to get a nudge before they're due."
+          action={<RenewalDialog subjectOptions={subjectOptions} fabOnMobile={false} />}
+        />
       ) : (
-        <RenewalTable rows={active} now={now} subjectOptions={subjectOptions} />
+        <RenewalCard id="active" title="Tracked" rows={active} now={now} subjectOptions={subjectOptions} />
       )}
 
       {archived.length > 0 ? (
-        <section className="space-y-3">
-          <p className="label-eyebrow">Archived · {archived.length}</p>
-          <div className="opacity-60">
-            <RenewalTable
-              rows={archived}
-              now={now}
-              subjectOptions={subjectOptions}
-            />
-          </div>
-        </section>
+        <RenewalCard
+          id="archived"
+          title="Archived"
+          caption="Done or paused"
+          rows={archived}
+          now={now}
+          subjectOptions={subjectOptions}
+          muted
+        />
       ) : null}
-    </div>
+    </>
   );
 }
 
-type RenewalRow = Awaited<
-  ReturnType<typeof prisma.renewal.findMany>
->[number];
+function DueCell({ dueDate, reminderDays, now }: { dueDate: Date; reminderDays: number; now: Date }) {
+  const { status, days } = dueStatusFor(dueDate, reminderDays, now);
+  const relative = dueLabel(days);
+  return (
+    <>
+      <Typography variant="body2" className="tabular" sx={{ fontWeight: status === "upcoming" ? 400 : 500 }}>
+        {format(dueDate, "d MMM yyyy")}
+      </Typography>
+      <Typography variant="caption" component="div" sx={{ color: STATUS_COLOR[status] }}>
+        {status === "upcoming" ? sentence(relative) : `${STATUS_LABEL[status]} · ${relative}`}
+      </Typography>
+    </>
+  );
+}
 
-function RenewalTable({
-  rows,
-  now,
-  subjectOptions,
-}: {
-  rows: RenewalRow[];
+interface RenewalCardProps {
+  id: string;
+  title: string;
+  caption?: string;
+  rows: Renewal[];
   now: Date;
   subjectOptions: string[];
-}) {
+  /** Fade every row (archived list). */
+  muted?: boolean;
+}
+
+function RenewalCard({ id, title, caption, rows, now, subjectOptions, muted = false }: RenewalCardProps) {
+  const headingId = `renewals-${id}`;
   return (
-    <div className="rounded-md border bg-card overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            <TableHead className="h-9 w-44">Due</TableHead>
-            <TableHead className="h-9">Title</TableHead>
-            <TableHead className="h-9">Category</TableHead>
-            <TableHead className="h-9">Recurrence</TableHead>
-            <TableHead className="h-9 text-right">Cost</TableHead>
-            <TableHead className="h-9" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map((r) => {
-            const { status, days } = dueStatusFor(
-              r.dueDate,
-              r.reminderDays,
-              now,
-            );
-            return (
-              <TableRow key={r.id}>
-                <TableCell className="align-top">
-                  <div className="flex flex-col gap-1">
-                    <span
-                      className={`w-fit rounded-sm text-[9px] uppercase tracking-wider font-medium px-1.5 py-0.5 ${STATUS_PILL[status]}`}
-                    >
-                      {STATUS_LABEL[status]}
-                    </span>
-                    <span className="text-[12px] tabular-nums whitespace-nowrap">
-                      {format(r.dueDate, "d MMM yyyy")}
-                    </span>
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {dueLabel(days)}
-                    </span>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[13px] font-medium align-top">
+    <Card component="section" aria-labelledby={headingId}>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 2,
+          px: 2,
+          py: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+          <Typography id={headingId} variant="h5" component="h2" noWrap>
+            {title}
+          </Typography>
+          <Chip
+            size="small"
+            variant="outlined"
+            label={`${rows.length} renewal${rows.length === 1 ? "" : "s"}`}
+          />
+        </Box>
+        {caption ? (
+          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+            {caption}
+          </Typography>
+        ) : null}
+      </Box>
+
+      <DataList<Renewal>
+        rows={rows}
+        getKey={(r) => r.id}
+        muted={muted ? () => true : undefined}
+        columns={[
+          {
+            id: "title",
+            header: "Renewal",
+            render: (r) => (
+              <>
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>
                   {r.title}
-                  {r.subject || r.provider ? (
-                    <div className="text-[11px] text-muted-foreground mt-0.5 font-normal">
-                      {[r.subject, r.provider].filter(Boolean).join(" · ")}
-                    </div>
-                  ) : null}
-                  {r.reference ? (
-                    <div className="text-[10px] text-muted-foreground/70 mt-0.5 font-mono">
-                      {r.reference}
-                    </div>
-                  ) : null}
-                </TableCell>
-                <TableCell className="align-top">
-                  <span className="rounded-sm bg-muted text-muted-foreground text-[10px] uppercase tracking-wider px-1.5 py-0.5">
-                    {r.category}
-                  </span>
-                </TableCell>
-                <TableCell className="text-[12px] text-muted-foreground align-top">
-                  {RENEWAL_RECURRENCE_LABELS[
-                    r.recurrence as RenewalRecurrence
-                  ] ?? r.recurrence}
-                </TableCell>
-                <TableCell className="text-right tabular-nums font-mono text-[13px] align-top">
-                  {r.cost != null ? formatGBP(r.cost) : "—"}
-                </TableCell>
-                <TableCell className="align-top">
-                  <div className="flex items-center justify-end gap-1">
-                    <RenewButton
-                      id={r.id}
-                      recurrence={r.recurrence}
-                      dueDate={r.dueDate}
-                    />
-                    <RenewalDialog
-                      subjectOptions={subjectOptions}
-                      triggerVariant="ghost"
-                      initial={{
-                        id: r.id,
-                        title: r.title,
-                        category: r.category,
-                        subject: r.subject,
-                        provider: r.provider,
-                        reference: r.reference,
-                        dueDate: r.dueDate,
-                        cost: r.cost,
-                        recurrence: r.recurrence,
-                        reminderDays: r.reminderDays,
-                        notes: r.notes,
-                        active: r.active,
-                      }}
-                    />
-                    <DeleteRenewalButton id={r.id} title={r.title} />
-                  </div>
-                </TableCell>
-              </TableRow>
+                </Typography>
+                {r.provider || r.reference ? (
+                  <Typography variant="caption" color="text.secondary" component="div">
+                    {[r.provider, r.reference].filter(Boolean).join(" · ")}
+                  </Typography>
+                ) : null}
+              </>
+            ),
+          },
+          {
+            id: "category",
+            header: "Category",
+            render: (r) => <Chip size="small" variant="outlined" label={r.category} />,
+          },
+          { id: "subject", header: "Subject", render: (r) => r.subject ?? "—" },
+          {
+            id: "due",
+            header: "Due",
+            nowrap: true,
+            render: (r) => <DueCell dueDate={r.dueDate} reminderDays={r.reminderDays} now={now} />,
+          },
+          {
+            id: "cost",
+            header: "Cost",
+            align: "right",
+            numeric: true,
+            render: (r) => (r.cost != null ? formatGBP(r.cost) : "—"),
+          },
+          {
+            id: "recurrence",
+            header: "Recurrence",
+            nowrap: true,
+            render: (r) => RENEWAL_RECURRENCE_LABELS[r.recurrence as RenewalRecurrence] ?? r.recurrence,
+          },
+        ]}
+        mobile={{
+          title: (r) => r.title,
+          meta: (r) => (
+            <Meta>
+              {r.category}
+              {r.subject}
+              {r.provider}
+              {format(r.dueDate, "d MMM yyyy")}
+            </Meta>
+          ),
+          value: (r) => {
+            const { status, days } = dueStatusFor(r.dueDate, r.reminderDays, now);
+            return (
+              <Box component="span" sx={{ color: STATUS_COLOR[status] }}>
+                {sentence(dueLabel(days))}
+              </Box>
             );
-          })}
-        </TableBody>
-      </Table>
-    </div>
+          },
+          valueSub: (r) => (r.cost != null ? formatGBP(r.cost) : null),
+        }}
+        actions={(r) => (
+          <>
+            <RenewButton id={r.id} title={r.title} recurrence={r.recurrence} dueDate={r.dueDate} />
+            <RenewalDialog
+              subjectOptions={subjectOptions}
+              initial={{
+                id: r.id,
+                title: r.title,
+                category: r.category,
+                subject: r.subject,
+                provider: r.provider,
+                reference: r.reference,
+                dueDate: r.dueDate,
+                cost: r.cost,
+                recurrence: r.recurrence,
+                reminderDays: r.reminderDays,
+                notes: r.notes,
+                active: r.active,
+              }}
+            />
+            <ConfirmDeleteButton
+              label={`Delete ${r.title}`}
+              heading="Delete renewal?"
+              description={`“${r.title}” will be permanently removed. This can't be undone.`}
+              onConfirm={deleteRenewal.bind(null, r.id)}
+            />
+          </>
+        )}
+      />
+    </Card>
   );
 }

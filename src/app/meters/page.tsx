@@ -1,51 +1,62 @@
 import { format } from "date-fns";
-import { Gauge, Zap, Flame, Droplet } from "lucide-react";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import BoltOutlined from "@mui/icons-material/BoltOutlined";
+import LocalFireDepartmentOutlined from "@mui/icons-material/LocalFireDepartmentOutlined";
+import SpeedOutlined from "@mui/icons-material/SpeedOutlined";
+import WaterDropOutlined from "@mui/icons-material/WaterDropOutlined";
 import { prisma } from "@/lib/db";
 import { formatReading } from "@/lib/admin";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Kpi } from "@/components/kpi";
-import { ReadingDialog } from "./_components/reading-dialog";
-import { DeleteReadingButton } from "./_components/delete-reading-button";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
+import { ReadingDialog, type MeterOption } from "./_components/reading-dialog";
+import { deleteReading } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-type Reading = Awaited<
-  ReturnType<typeof prisma.meterReading.findMany>
->[number];
+type Reading = Awaited<ReturnType<typeof prisma.meterReading.findMany>>[number];
+
+interface AnnotatedReading {
+  row: Reading;
+  /** Usage since the prior reading (null for the first). */
+  delta: number | null;
+  /** Whole days since the prior reading (null for the first). */
+  sinceDays: number | null;
+}
 
 interface MeterGroup {
   meter: string;
   unit: string | null;
-  // Chronological ascending, each annotated with usage since the prior
-  // reading (null for the first).
-  readings: { row: Reading; delta: number | null }[];
+  /** Chronological ascending. */
+  readings: AnnotatedReading[];
 }
 
-function MeterGlyph({
-  meter,
-  className,
-}: {
-  meter: string;
-  className?: string;
-}) {
+function meterGlyph(meter: string) {
   const m = meter.toLowerCase();
-  if (/elec|power/.test(m)) return <Zap className={className} />;
-  if (/gas/.test(m)) return <Flame className={className} />;
-  if (/water/.test(m)) return <Droplet className={className} />;
-  return <Gauge className={className} />;
+  if (/elec|power/.test(m)) return <BoltOutlined />;
+  if (/gas/.test(m)) return <LocalFireDepartmentOutlined />;
+  if (/water/.test(m)) return <WaterDropOutlined />;
+  return <SpeedOutlined />;
 }
 
 function daysBetween(a: Date, b: Date): number {
   const da = Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate());
   const db = Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate());
   return Math.round((da - db) / 86_400_000);
+}
+
+// "+123 kWh" / "-4 m³"
+function signed(n: number, unit: string | null): string {
+  return `${n >= 0 ? "+" : ""}${formatReading(n, unit)}`;
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
 export default async function MetersPage() {
@@ -62,172 +73,246 @@ export default async function MetersPage() {
       byMeter.set(row.meter, group);
     }
     const prev = group.readings[group.readings.length - 1];
-    const delta = prev ? row.value - prev.row.value : null;
-    group.readings.push({ row, delta });
+    group.readings.push({
+      row,
+      delta: prev ? row.value - prev.row.value : null,
+      sinceDays: prev ? daysBetween(row.date, prev.row.date) : null,
+    });
     // Keep the most recent non-empty unit for the meter header.
     if (row.unit) group.unit = row.unit;
   }
 
-  const groups = Array.from(byMeter.values()).sort((a, b) =>
-    a.meter.localeCompare(b.meter),
-  );
-  const meterOptions = groups.map((g) => g.meter);
+  const groups = Array.from(byMeter.values()).sort((a, b) => a.meter.localeCompare(b.meter));
+  const meterOptions: MeterOption[] = groups.map((g) => ({ meter: g.meter, unit: g.unit }));
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Life admin</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Meter readings
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Log gas, electric, water — or anything cumulative. Usage is the
-            difference between readings.
-          </p>
-        </div>
-        <div className="flex items-end gap-3">
-          <div className="grid grid-cols-2 gap-3 min-w-[260px]">
-            <Kpi label="Meters" value={String(groups.length)} />
-            <Kpi label="Readings" value={String(all.length)} />
-          </div>
-          <ReadingDialog meterOptions={meterOptions} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Life admin"
+        title="Meter readings"
+        description="Log gas, electric, water — or anything cumulative. Usage is the difference between readings."
+        actions={<ReadingDialog meterOptions={meterOptions} />}
+      />
 
       {groups.length === 0 ? (
-        <div className="rounded-md border border-dashed p-12 flex flex-col items-center gap-3 text-center">
-          <Gauge className="size-8 text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">
-            No readings yet. Add your first electricity, gas or water reading to
-            start tracking usage.
-          </p>
-        </div>
+        <EmptyState
+          icon={<SpeedOutlined fontSize="inherit" />}
+          title="No readings yet"
+          description="Add your first electricity, gas or water reading to start tracking usage."
+          action={<ReadingDialog meterOptions={meterOptions} fabOnMobile={false} />}
+        />
       ) : (
-        <div className="space-y-6">
-          {groups.map((group) => (
-            <MeterCard key={group.meter} group={group} />
+        <Stack spacing={2}>
+          {groups.map((group, i) => (
+            <MeterCard key={group.meter} group={group} index={i} />
           ))}
-        </div>
+        </Stack>
       )}
-    </div>
+    </>
   );
 }
 
-function MeterCard({ group }: { group: MeterGroup }) {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <Box sx={{ minWidth: 0 }}>
+      <Typography variant="overline" component="p" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="h5" component="p" className="tabular" sx={{ mt: 0.5 }}>
+        {value}
+      </Typography>
+      {sub ? (
+        <Typography variant="caption" component="p" color="text.secondary">
+          {sub}
+        </Typography>
+      ) : null}
+    </Box>
+  );
+}
+
+function MeterCard({ group, index }: { group: MeterGroup; index: number }) {
   const ascending = group.readings;
   const latest = ascending[ascending.length - 1];
-  const previous = ascending[ascending.length - 2];
-
-  const sinceDays =
-    previous != null
-      ? daysBetween(latest.row.date, previous.row.date)
-      : 0;
-  const perDay =
-    latest.delta != null && sinceDays > 0 ? latest.delta / sinceDays : null;
+  const sinceDays = latest.sinceDays ?? 0;
+  const perDay = latest.delta != null && sinceDays > 0 ? latest.delta / sinceDays : null;
 
   // Most-recent-first for display.
   const rows = [...ascending].reverse();
+  const headingId = `meter-${index}`;
 
   return (
-    <section className="rounded-md border bg-card overflow-hidden">
-      <div className="flex items-start justify-between gap-3 px-5 py-4 border-b">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center justify-center size-9 rounded-md bg-primary/10 text-primary">
-            <MeterGlyph meter={group.meter} className="size-4" />
-          </span>
-          <div>
-            <h2 className="text-[15px] font-semibold leading-tight">
-              {group.meter}
-            </h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Latest{" "}
-              <span className="font-mono tabular-nums text-foreground">
-                {formatReading(latest.row.value, group.unit)}
-              </span>{" "}
-              · {format(latest.row.date, "d MMM yyyy")}
-            </p>
-          </div>
-        </div>
-        <ReadingDialog
-          defaultMeter={group.meter}
-          defaultUnit={group.unit ?? undefined}
-          triggerVariant="outline"
-        />
-      </div>
+    <Card component="section" aria-labelledby={headingId}>
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 2,
+          px: 2,
+          py: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+          <Box
+            aria-hidden
+            sx={{
+              width: 40,
+              height: 40,
+              borderRadius: 2.5,
+              display: "grid",
+              placeItems: "center",
+              bgcolor: "m3.primaryContainer",
+              color: "m3.onPrimaryContainer",
+              flexShrink: 0,
+            }}
+          >
+            {meterGlyph(group.meter)}
+          </Box>
+          <Typography id={headingId} variant="h5" component="h2" noWrap>
+            {group.meter}
+          </Typography>
+          {group.unit ? <Chip size="small" variant="outlined" label={group.unit} /> : null}
+        </Box>
+        <ReadingDialog trigger="icon" defaultMeter={group.meter} defaultUnit={group.unit ?? undefined} />
+      </Box>
 
-      {latest.delta != null ? (
-        <div className="px-5 py-3 border-b bg-muted/30 flex flex-wrap items-baseline gap-x-6 gap-y-1">
-          <span className="text-[13px]">
-            <span className="text-muted-foreground">Last usage </span>
-            <span className="font-mono tabular-nums font-medium">
-              {latest.delta >= 0 ? "+" : ""}
-              {formatReading(latest.delta, group.unit)}
-            </span>
-          </span>
-          <span className="text-[12px] text-muted-foreground">
-            over {sinceDays} day{sinceDays === 1 ? "" : "s"}
-          </span>
-          {perDay != null ? (
-            <span className="text-[12px] text-muted-foreground">
-              ≈{" "}
-              <span className="font-mono tabular-nums">
-                {formatReading(
-                  Math.round(perDay * 100) / 100,
-                  group.unit,
-                )}
-              </span>{" "}
-              / day
-            </span>
-          ) : null}
-        </div>
-      ) : (
-        <div className="px-5 py-3 border-b bg-muted/30">
-          <span className="text-[12px] text-muted-foreground">
+      <Box
+        sx={{
+          display: "grid",
+          gap: 2,
+          gridTemplateColumns: { xs: "1fr", sm: "auto 1fr" },
+          alignItems: "end",
+          px: 2,
+          py: 2,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="overline" component="p" color="text.secondary">
+            Latest reading
+          </Typography>
+          <Typography variant="h3" component="p" className="tabular" sx={{ mt: 0.5, overflowWrap: "anywhere" }}>
+            {formatReading(latest.row.value, group.unit)}
+          </Typography>
+          <Typography variant="caption" component="p" color="text.secondary">
+            {format(latest.row.date, "d MMM yyyy")} · {plural(ascending.length, "reading")}
+          </Typography>
+        </Box>
+
+        {latest.delta != null ? (
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 3, justifySelf: { sm: "end" } }}>
+            <Stat
+              label="Since previous"
+              value={signed(latest.delta, group.unit)}
+              sub={`over ${plural(sinceDays, "day")}`}
+            />
+            {perDay != null ? (
+              <Stat
+                label="Average"
+                value={formatReading(Math.round(perDay * 100) / 100, group.unit)}
+                sub="per day"
+              />
+            ) : null}
+          </Box>
+        ) : (
+          <Typography variant="body2" color="text.secondary">
             First reading — add another to see usage.
-          </span>
-        </div>
-      )}
+          </Typography>
+        )}
+      </Box>
 
-      <Table>
-        <TableHeader>
-          <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            <TableHead className="h-9">Date</TableHead>
-            <TableHead className="h-9 text-right">Reading</TableHead>
-            <TableHead className="h-9 text-right">Usage</TableHead>
-            <TableHead className="h-9">Notes</TableHead>
-            <TableHead className="h-9" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {rows.map(({ row, delta }) => (
-            <TableRow key={row.id}>
-              <TableCell className="text-[12px] tabular-nums text-muted-foreground whitespace-nowrap">
-                {format(row.date, "d MMM yyyy")}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-[13px]">
-                {formatReading(row.value, group.unit)}
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums text-[12px] text-muted-foreground">
-                {delta == null
-                  ? "—"
-                  : `${delta >= 0 ? "+" : ""}${delta.toLocaleString("en-GB", {
-                      maximumFractionDigits: 3,
-                    })}`}
-              </TableCell>
-              <TableCell className="text-[12px] text-muted-foreground max-w-xs truncate">
-                {row.notes ?? ""}
-              </TableCell>
-              <TableCell className="text-right">
-                <DeleteReadingButton
-                  id={row.id}
-                  label={`${group.meter} · ${format(row.date, "d MMM yyyy")}`}
-                />
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </section>
+      <DataList<AnnotatedReading>
+        rows={rows}
+        getKey={(r) => r.row.id}
+        columns={[
+          {
+            id: "date",
+            header: "Date",
+            nowrap: true,
+            render: (r) => format(r.row.date, "d MMM yyyy"),
+          },
+          {
+            id: "value",
+            header: "Reading",
+            align: "right",
+            numeric: true,
+            nowrap: true,
+            render: (r) => (
+              <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                {formatReading(r.row.value, group.unit)}
+              </Typography>
+            ),
+          },
+          {
+            id: "delta",
+            header: "Usage",
+            align: "right",
+            numeric: true,
+            nowrap: true,
+            render: (r) =>
+              r.delta == null ? (
+                "—"
+              ) : (
+                <Box component="span" sx={{ color: r.delta < 0 ? "error.main" : undefined }}>
+                  {signed(r.delta, group.unit)}
+                </Box>
+              ),
+          },
+          {
+            id: "days",
+            header: "Days",
+            align: "right",
+            numeric: true,
+            render: (r) => (r.sinceDays == null ? "—" : String(r.sinceDays)),
+          },
+          {
+            id: "notes",
+            header: "Notes",
+            render: (r) =>
+              r.row.notes ? (
+                <Typography variant="body2" color="text.secondary">
+                  {r.row.notes}
+                </Typography>
+              ) : (
+                ""
+              ),
+          },
+        ]}
+        mobile={{
+          title: (r) => formatReading(r.row.value, group.unit),
+          meta: (r) => (
+            <Meta>
+              {format(r.row.date, "d MMM yyyy")}
+              {r.sinceDays != null ? `${plural(r.sinceDays, "day")} since previous` : null}
+              {r.row.notes}
+            </Meta>
+          ),
+          value: (r) =>
+            r.delta == null ? (
+              "—"
+            ) : (
+              <Box component="span" sx={{ color: r.delta < 0 ? "error.main" : undefined }}>
+                {signed(r.delta, group.unit)}
+              </Box>
+            ),
+          valueSub: (r) => (r.delta == null ? "First reading" : null),
+        }}
+        actions={(r) => {
+          const when = format(r.row.date, "d MMM yyyy");
+          return (
+            <ConfirmDeleteButton
+              label={`Delete ${group.meter} reading from ${when}`}
+              heading="Delete reading?"
+              description={`The ${group.meter} reading from ${when} will be permanently removed. Usage for the following reading will be recalculated.`}
+              successMessage="Reading deleted"
+              onConfirm={deleteReading.bind(null, r.row.id)}
+            />
+          );
+        }}
+      />
+    </Card>
   );
 }

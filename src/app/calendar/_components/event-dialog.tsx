@@ -1,29 +1,21 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import Autocomplete from "@mui/material/Autocomplete";
+import Box from "@mui/material/Box";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import MenuItem from "@mui/material/MenuItem";
+import Stack from "@mui/material/Stack";
+import Switch from "@mui/material/Switch";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import { toast } from "@/components/toast";
+import { FormDialog } from "@/components/form-dialog";
+import { ResponsiveAction } from "@/components/responsive-action";
 import {
   IMPORTANCE_LEVELS,
   IMPORTANCE_LABELS,
@@ -43,62 +35,47 @@ export interface EventInitial {
   notes: string | null;
 }
 
+export type GiftAmounts = Record<ImportanceLevel, number>;
+
 interface Props {
+  /** When set, the dialog edits this event and the trigger is an edit icon. */
   initial?: EventInitial;
-  giftAmounts: { LOW: number; MEDIUM: number; HIGH: number };
-  triggerLabel?: string;
-  triggerVariant?: "default" | "ghost" | "outline";
+  /** Tier budgets from settings, shown next to each importance option. */
+  giftAmounts: GiftAmounts;
+  /** Names offered as suggestions in the Person field. */
+  personOptions?: string[];
+  /** For the create trigger: render as a FAB on phones (default) or a plain button. */
+  fabOnMobile?: boolean;
 }
 
+// Select value for "no importance tier". The field is simply omitted from
+// the FormData in that case, which the Zod schema reads as null.
 const NONE = "__none__";
 
-export function EventDialog({
-  initial,
-  giftAmounts,
-  triggerLabel,
-  triggerVariant = "default",
-}: Props) {
+export function EventDialog({ initial, giftAmounts, personOptions = [], fabOnMobile = true }: Props) {
   const [open, setOpen] = useState(false);
   const isEdit = Boolean(initial);
 
-  const triggerContent = isEdit ? (
-    triggerLabel ?? "Edit"
-  ) : (
-    <>
-      <Plus className="size-4" />
-      {triggerLabel ?? "Add event"}
-    </>
-  );
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant={triggerVariant} size={isEdit ? "sm" : "default"} />
-        }
-      >
-        {triggerContent}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? "Edit event" : "New event"}
-          </DialogTitle>
-          <DialogDescription>
-            Birthdays, parties, one-off purchases. Importance auto-fills the
-            budget from your settings.
-          </DialogDescription>
-        </DialogHeader>
-        {open && (
-          <EventForm
-            initial={initial}
-            giftAmounts={giftAmounts}
-            isEdit={isEdit}
-            onDone={() => setOpen(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <>
+      {isEdit ? (
+        <Tooltip title={`Edit ${initial!.title}`}>
+          <IconButton size="small" aria-label={`Edit ${initial!.title}`} onClick={() => setOpen(true)}>
+            <EditOutlined fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <ResponsiveAction label="New event" onClick={() => setOpen(true)} fabOnMobile={fabOnMobile} />
+      )}
+      {open ? (
+        <EventForm
+          initial={initial}
+          giftAmounts={giftAmounts}
+          personOptions={personOptions}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -112,20 +89,17 @@ function dateInputValue(d: Date | null | undefined): string {
 
 interface FormProps {
   initial?: EventInitial;
-  giftAmounts: { LOW: number; MEDIUM: number; HIGH: number };
-  isEdit: boolean;
-  onDone: () => void;
+  giftAmounts: GiftAmounts;
+  personOptions: string[];
+  onClose: () => void;
 }
 
-function EventForm({ initial, giftAmounts, isEdit, onDone }: FormProps) {
+function EventForm({ initial, giftAmounts, personOptions, onClose }: FormProps) {
+  const isEdit = Boolean(initial);
   const [title, setTitle] = useState(initial?.title ?? "");
   const [date, setDate] = useState(dateInputValue(initial?.date));
-  const [recursAnnually, setRecursAnnually] = useState(
-    initial?.recursAnnually ?? false,
-  );
-  const [importance, setImportance] = useState<string>(
-    initial?.importance ?? NONE,
-  );
+  const [recursAnnually, setRecursAnnually] = useState(initial?.recursAnnually ?? false);
+  const [importance, setImportance] = useState<string>(initial?.importance ?? NONE);
   const [amountOverride, setAmountOverride] = useState(
     initial?.amount != null ? String(initial.amount) : "",
   );
@@ -133,172 +107,176 @@ function EventForm({ initial, giftAmounts, isEdit, onDone }: FormProps) {
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [pending, startTransition] = useTransition();
 
-  // Effective amount preview: explicit override wins, else lookup by importance
-  const effectiveAmount = (() => {
-    if (amountOverride.trim() !== "") return Number(amountOverride);
-    if (importance === "LOW") return giftAmounts.LOW;
-    if (importance === "MEDIUM") return giftAmounts.MEDIUM;
-    if (importance === "HIGH") return giftAmounts.HIGH;
-    return 0;
-  })();
+  const hasOverride = amountOverride.trim() !== "";
+  const tier = importance === NONE ? null : (importance as ImportanceLevel);
+  // Effective budget preview: an explicit override wins, else the tier
+  // amount from settings, else nothing.
+  const effectiveAmount = hasOverride ? Number(amountOverride) : tier ? giftAmounts[tier] : 0;
+
+  const valid =
+    title.trim().length > 0 && date !== "" && (!hasOverride || Number(amountOverride) >= 0);
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    formData.set("recursAnnually", recursAnnually ? "true" : "false");
-    if (importance === NONE) {
-      formData.delete("importance");
-    } else {
-      formData.set("importance", importance);
-    }
+    if (!valid) return;
+    const fd = new FormData();
+    fd.set("title", title.trim());
+    fd.set("date", date);
+    fd.set("recursAnnually", recursAnnually ? "true" : "false");
+    if (tier) fd.set("importance", tier);
+    fd.set("amount", amountOverride.trim());
+    fd.set("person", person.trim());
+    fd.set("notes", notes.trim());
 
     startTransition(async () => {
       try {
         if (initial) {
-          await updateCalendarEvent(initial.id, formData);
-          toast.success("Updated");
+          await updateCalendarEvent(initial.id, fd);
+          toast.success("Updated", title.trim());
         } else {
-          await createCalendarEvent(formData);
-          toast.success("Added");
+          await createCalendarEvent(fd);
+          toast.success("Added", title.trim());
         }
-        onDone();
+        onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+        toast.error("Could not save", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
+  const budgetNote =
+    effectiveAmount > 0
+      ? `Budget ${formatGBP(effectiveAmount)}${
+          hasOverride ? " (manual override)" : tier ? ` (from ${IMPORTANCE_LABELS[tier]} tier)` : ""
+        }`
+      : "No budget allocated.";
+
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="title">Title</Label>
-        <Input
-          id="title"
-          name="title"
+    <FormDialog
+      open
+      onClose={onClose}
+      title={isEdit ? "Edit event" : "New event"}
+      description="Parties, anniversaries, one-off purchases. Importance fills in the budget from your settings; birthdays come from People automatically."
+      onSubmit={onSubmit}
+      submitLabel={isEdit ? "Save" : "Add"}
+      pending={pending}
+      submitDisabled={!valid}
+    >
+      <Stack spacing={2.5}>
+        <TextField
+          label="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="e.g. Sarah's birthday, Wedding party"
           required
-          maxLength={120}
           autoFocus
+          placeholder="e.g. Wedding party, Anniversary dinner"
+          slotProps={{ htmlInput: { maxLength: 120 } }}
         />
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="date">Date</Label>
-          <Input
-            id="date"
-            name="date"
+        <Box
+          sx={{
+            display: "grid",
+            gap: 2.5,
+            gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" },
+            alignItems: "center",
+          }}
+        >
+          <TextField
+            label="Date"
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
             required
+            slotProps={{ inputLabel: { shrink: true } }}
           />
-        </div>
-        <div className="space-y-2 flex flex-col">
-          <Label>Recurs annually</Label>
-          <div className="flex items-center gap-2 h-9">
-            <Switch
-              checked={recursAnnually}
-              onCheckedChange={setRecursAnnually}
-            />
-            <span className="text-[12px] text-muted-foreground">
-              {recursAnnually ? "Every year" : "One-off"}
-            </span>
-          </div>
-        </div>
-      </div>
+          <FormControlLabel
+            control={<Switch checked={recursAnnually} onChange={(_, v) => setRecursAnnually(v)} />}
+            label="Repeats every year"
+            sx={{ ml: 0, gap: 1.5 }}
+          />
+        </Box>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="importance">Importance</Label>
-          <Select
-            value={importance}
-            onValueChange={(v) => setImportance(v ?? NONE)}
-          >
-            <SelectTrigger id="importance" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NONE}>
-                <span className="text-muted-foreground">No tier</span>
-              </SelectItem>
+        <Box>
+          <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+            <TextField
+              select
+              label="Importance"
+              value={importance}
+              onChange={(e) => setImportance(e.target.value)}
+              slotProps={{
+                select: {
+                  renderValue: (v) =>
+                    v === NONE ? "No tier" : IMPORTANCE_LABELS[v as ImportanceLevel],
+                },
+              }}
+            >
+              <MenuItem value={NONE}>
+                <Typography component="span" color="text.secondary">
+                  No tier
+                </Typography>
+              </MenuItem>
               {IMPORTANCE_LEVELS.map((lvl) => (
-                <SelectItem key={lvl} value={lvl}>
-                  <div className="flex items-baseline justify-between gap-3 w-full">
+                <MenuItem key={lvl} value={lvl}>
+                  <Box
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "baseline",
+                      gap: 2,
+                      width: "100%",
+                    }}
+                  >
                     <span>{IMPORTANCE_LABELS[lvl]}</span>
-                    <span className="text-[11px] text-muted-foreground tabular-nums">
-                      £{giftAmounts[lvl as ImportanceLevel].toFixed(0)}
-                    </span>
-                  </div>
-                </SelectItem>
+                    <Typography component="span" variant="caption" color="text.secondary" className="tabular">
+                      {formatGBP(giftAmounts[lvl])}
+                    </Typography>
+                  </Box>
+                </MenuItem>
               ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="amount">Amount override (£)</Label>
-          <Input
-            id="amount"
-            name="amount"
-            type="number"
-            step="0.01"
-            min="0"
-            value={amountOverride}
-            onChange={(e) => setAmountOverride(e.target.value)}
-            placeholder="optional"
-          />
-        </div>
-      </div>
+            </TextField>
+            <TextField
+              label="Amount override"
+              type="number"
+              inputMode="decimal"
+              value={amountOverride}
+              onChange={(e) => setAmountOverride(e.target.value)}
+              placeholder="Optional"
+              slotProps={{
+                input: { startAdornment: <InputAdornment position="start">£</InputAdornment> },
+                htmlInput: { min: 0, step: 0.01 },
+              }}
+            />
+          </Box>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            component="p"
+            className="tabular"
+            sx={{ mt: 1, mx: 2 }}
+          >
+            {budgetNote}
+          </Typography>
+        </Box>
 
-      {effectiveAmount > 0 ? (
-        <p className="text-[11px] text-muted-foreground -mt-2">
-          Budget: <span className="font-mono tabular-nums">{formatGBP(effectiveAmount)}</span>
-          {amountOverride.trim() !== ""
-            ? " (manual override)"
-            : importance !== NONE
-              ? ` (from ${IMPORTANCE_LABELS[importance as ImportanceLevel]} tier)`
-              : ""}
-        </p>
-      ) : (
-        <p className="text-[11px] text-muted-foreground -mt-2">
-          No budget allocated.
-        </p>
-      )}
-
-      <div className="space-y-2">
-        <Label htmlFor="person">Person (optional)</Label>
-        <Input
-          id="person"
-          name="person"
-          placeholder="e.g. Mum, Sarah"
-          value={person}
-          onChange={(e) => setPerson(e.target.value)}
-          maxLength={120}
+        <Autocomplete
+          freeSolo
+          options={personOptions}
+          inputValue={person}
+          onInputChange={(_, v) => setPerson(v)}
+          renderInput={(params) => (
+            <TextField {...params} label="Person" placeholder="Optional — e.g. Mum, Sarah" />
+          )}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
-        <Textarea
-          id="notes"
-          name="notes"
-          rows={2}
-          placeholder="Optional"
+        <TextField
+          label="Notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          multiline
+          minRows={2}
+          placeholder="Optional"
         />
-      </div>
-
-      <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : isEdit ? "Save" : "Add"}
-        </Button>
-      </DialogFooter>
-    </form>
+      </Stack>
+    </FormDialog>
   );
 }

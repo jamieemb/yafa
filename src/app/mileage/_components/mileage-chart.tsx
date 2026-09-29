@@ -1,105 +1,118 @@
 "use client";
 
-import { CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts";
 import { format } from "date-fns";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
+import { useTheme } from "@mui/material/styles";
+import { LineChart, type LineSeries } from "@mui/x-charts/LineChart";
+import type { M3Scheme } from "@/lib/m3-colors";
+import { formatMiles, type MileageSeriesPoint } from "@/lib/mileage";
 
-interface Point {
-  ts: number;
-  actual?: number;
-  allowance?: number;
-  projection?: number;
-}
-
-const config = {
-  actual: { label: "Actual", color: "var(--chart-1)" },
-  allowance: { label: "Allowance", color: "var(--chart-5)" },
-  projection: { label: "Projection", color: "var(--chart-2)" },
-} satisfies ChartConfig;
-
-export function MileageChart({
-  data,
-  startTs,
-  endTs,
-}: {
-  data: Point[];
+interface Props {
+  data: MileageSeriesPoint[];
+  /** Contract start / end, used as the fixed x-domain so the whole term is visible. */
   startTs: number;
   endTs: number;
-}) {
+  height?: number;
+}
+
+type SeriesKey = "actual" | "allowance" | "projection";
+
+/**
+ * Cumulative miles over the contract term: the steady allowance line,
+ * the actual odometer trajectory, and (once there's enough data) the
+ * projection to term end at the observed average.
+ */
+export function MileageChart({ data, startTs, endTs, height = 280 }: Props) {
+  const theme = useTheme();
+  // With CSS variables enabled the var() references follow the active
+  // scheme; the raw palette is the fallback when they are not.
+  const m3 = (role: keyof M3Scheme) =>
+    theme.vars ? `var(--mui-palette-m3-${role})` : theme.palette.m3[role];
+
+  const x = data.map((p) => p.ts);
+  const pick = (key: SeriesKey) => data.map((p) => p[key] ?? null);
+  const hasProjection = data.some((p) => p.projection != null);
+
+  const miles = (v: number | null) => (v == null ? null : `${formatMiles(v)} mi`);
+
+  const series: LineSeries[] = [
+    {
+      id: "allowance",
+      label: "Allowance",
+      data: pick("allowance"),
+      color: m3("outline"),
+      curve: "linear",
+      showMark: false,
+      connectNulls: true,
+      valueFormatter: miles,
+    },
+    ...(hasProjection
+      ? [
+          {
+            id: "projection",
+            label: "Projection",
+            data: pick("projection"),
+            color: m3("tertiary"),
+            curve: "linear",
+            showMark: false,
+            connectNulls: true,
+            valueFormatter: miles,
+          } satisfies LineSeries,
+        ]
+      : []),
+    {
+      id: "actual",
+      label: "Actual",
+      data: pick("actual"),
+      color: m3("primary"),
+      curve: "linear",
+      showMark: false,
+      connectNulls: true,
+      valueFormatter: miles,
+    },
+  ];
+
   return (
-    <ChartContainer config={config} className="h-72 w-full aspect-auto">
-      <LineChart data={data} margin={{ left: 4, right: 14, top: 8, bottom: 0 }}>
-        <CartesianGrid vertical={false} strokeDasharray="3 3" />
-        <XAxis
-          dataKey="ts"
-          type="number"
-          scale="time"
-          domain={[startTs, endTs]}
-          tickFormatter={(v) => format(new Date(v), "MMM yy")}
-          tickLine={false}
-          axisLine={false}
-          minTickGap={44}
-          tickMargin={8}
-        />
-        <YAxis
-          tickFormatter={(v) => Number(v).toLocaleString("en-GB")}
-          tickLine={false}
-          axisLine={false}
-          width={52}
-          tickMargin={4}
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(_value, payload) => {
-                const ts = payload?.[0]?.payload?.ts;
-                return ts ? format(new Date(ts), "d MMM yyyy") : "";
-              }}
-              formatter={(value, name) => (
-                <div className="flex items-center justify-between gap-3 w-full">
-                  <span className="text-muted-foreground capitalize">
-                    {String(name)}
-                  </span>
-                  <span className="font-mono tabular-nums">
-                    {Number(value).toLocaleString("en-GB")} mi
-                  </span>
-                </div>
-              )}
-            />
-          }
-        />
-        <Line
-          dataKey="allowance"
-          type="linear"
-          stroke="var(--color-allowance)"
-          strokeWidth={1.5}
-          strokeDasharray="5 4"
-          dot={false}
-          connectNulls
-        />
-        <Line
-          dataKey="projection"
-          type="linear"
-          stroke="var(--color-projection)"
-          strokeWidth={1.5}
-          strokeDasharray="2 3"
-          dot={false}
-          connectNulls
-        />
-        <Line
-          dataKey="actual"
-          type="linear"
-          stroke="var(--color-actual)"
-          strokeWidth={2}
-          dot={{ r: 2 }}
-          connectNulls
-        />
-      </LineChart>
-    </ChartContainer>
+    <LineChart
+      height={height}
+      series={series}
+      xAxis={[
+        {
+          id: "time",
+          data: x,
+          scaleType: "time",
+          min: startTs,
+          max: endTs,
+          valueFormatter: (v: number | Date, ctx) =>
+            format(new Date(v), ctx.location === "tooltip" ? "d MMM yyyy" : "MMM yy"),
+          disableLine: true,
+          disableTicks: true,
+          tickNumber: 5,
+          tickLabelMinGap: 24,
+          height: 28,
+        },
+      ]}
+      yAxis={[
+        {
+          min: 0,
+          valueFormatter: (v: number) => formatMiles(v),
+          disableLine: true,
+          disableTicks: true,
+          width: 52,
+        },
+      ]}
+      grid={{ horizontal: true }}
+      margin={{ left: 0, right: 12, top: 8, bottom: 0 }}
+      slotProps={{
+        legend: {
+          direction: "horizontal",
+          position: { vertical: "top", horizontal: "end" },
+        },
+      }}
+      sx={{
+        "& .MuiLineElement-series-allowance": { strokeDasharray: "5 4", strokeWidth: 1.5 },
+        "& .MuiLineElement-series-projection": { strokeDasharray: "2 3", strokeWidth: 1.5 },
+        "& .MuiLineElement-series-actual": { strokeWidth: 2 },
+      }}
+    />
   );
 }

@@ -1,43 +1,41 @@
-import Link from "next/link";
 import { format } from "date-fns";
-import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  Cake,
-  CalendarDays,
-  CalendarClock,
-  ChevronLeft,
-  ChevronRight,
-  PiggyBank,
-  Sparkles,
-} from "lucide-react";
+import Alert from "@mui/material/Alert";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Chip from "@mui/material/Chip";
+import LinearProgress from "@mui/material/LinearProgress";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import AutoAwesomeOutlined from "@mui/icons-material/AutoAwesomeOutlined";
+import CakeOutlined from "@mui/icons-material/CakeOutlined";
+import CallMadeOutlined from "@mui/icons-material/CallMadeOutlined";
+import CallReceivedOutlined from "@mui/icons-material/CallReceivedOutlined";
+import EventAvailableOutlined from "@mui/icons-material/EventAvailableOutlined";
+import EventOutlined from "@mui/icons-material/EventOutlined";
+import SavingsOutlined from "@mui/icons-material/SavingsOutlined";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
+import { categoryColor } from "@/lib/pot-colors";
 import { getSettings, giftAmountFor, resolveEventAmount } from "@/lib/settings";
 import {
   BUDGET_CATEGORIES,
+  IMPORTANCE_LABELS,
   monthlyEquivalent,
   type BudgetCategory,
   type Frequency,
   type ImportanceLevel,
 } from "@/lib/categories";
-import { dueStatusFor, dueLabel } from "@/lib/admin";
-import { Kpi } from "@/components/kpi";
+import { dueStatusFor, dueLabel, type DueStatus } from "@/lib/admin";
+import { PageHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { DataList, Meta } from "@/components/data-list";
 import { AllocationChart } from "./_components/allocation-chart";
+import { MonthNav } from "./_components/month-nav";
+import { LinkButton, TextLink } from "@/components/next-link";
+import { EmptyPanel, PanelHeader, SplitRow } from "./_components/panels";
 
 export const dynamic = "force-dynamic";
-
-const POT_COLOURS = [
-  "#003A6C",
-  "#FD8973",
-  "#4F7E5C",
-  "#B8956A",
-  "#6B7E8C",
-  "#2E5783",
-  "#E0A993",
-  "#84A48F",
-];
-
 
 interface PotSummary {
   category: BudgetCategory;
@@ -102,6 +100,20 @@ function occurrenceInMonth(
   }
   return null;
 }
+
+const DUE_COLOR: Record<DueStatus, string> = {
+  overdue: "error.main",
+  "due-soon": "warning.main",
+  upcoming: "text.secondary",
+};
+
+// Two-column row on desktop (7/5 split), stacked on phones.
+const TWO_COL = {
+  display: "grid",
+  gap: 2,
+  gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 7fr) minmax(0, 5fr)" },
+  alignItems: "start",
+} as const;
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const sp = await searchParams;
@@ -237,7 +249,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const potSlices = pots.map((p, i) => ({
     category: p.category,
     total: p.total,
-    color: POT_COLOURS[i % POT_COLOURS.length],
+    color: categoryColor(i),
   }));
 
   const today = new Date();
@@ -253,39 +265,41 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     .filter((r) => r.days <= RENEWAL_HORIZON_DAYS)
     .sort((a, b) => a.renewal.dueDate.getTime() - b.renewal.dueDate.getTime())
     .slice(0, 6);
+  type RenewalRow = (typeof upcomingRenewals)[number];
 
   const isCurrentMonth = monthIso === currentMonthIso();
   const prevIso = dateToIso(shiftMonths(budgetMonth, -1));
   const nextIso = dateToIso(shiftMonths(budgetMonth, 1));
 
-  return (
-    <div className="space-y-5">
-      {/* Header with month nav */}
-      <div className="flex items-end justify-between gap-4">
-        <div>
-          <p className="label-eyebrow">YAFA</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            {format(budgetMonth, "MMMM yyyy")} budget
-          </h1>
-        </div>
-        <div className="flex items-center gap-3">
-          <p className="label-eyebrow hidden sm:block">
-            As of {format(today, "d MMM, HH:mm")}
-          </p>
-          <MonthNav
-            prevIso={prevIso}
-            nextIso={nextIso}
-            isCurrent={isCurrentMonth}
-          />
-        </div>
-      </div>
+  const monthName = format(budgetMonth, "MMMM");
+  const shareOf = (value: number) => (outflowMonthly > 0 ? (value / outflowMonthly) * 100 : 0);
+  const overBudget = hasIncome && discretionary < 0;
 
-      {/* KPI Strip */}
-      <div className="grid grid-cols-4 gap-3">
+  type EventRow = MonthEvent & { key: string };
+  const eventRows: EventRow[] = monthEvents.map((e, i) => ({ ...e, key: `${e.kind}-${i}` }));
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Overview"
+        title={format(budgetMonth, "MMMM yyyy")}
+        description={`Budget snapshot as of ${format(today, "d MMM, HH:mm")}.`}
+        actions={
+          <MonthNav
+            label={format(budgetMonth, "MMM yyyy")}
+            prevHref={`/dashboard?month=${prevIso}`}
+            nextHref={`/dashboard?month=${nextIso}`}
+            currentHref={isCurrentMonth ? undefined : `/dashboard?month=${currentMonthIso()}`}
+          />
+        }
+      />
+
+      {/* ── Headline strip ───────────────────────────────────────── */}
+      <KpiGrid columns={4}>
         <Kpi
           size="lg"
           label={`Income · ${format(budgetMonth, "MMM")}`}
-          icon={<ArrowDownLeft className="size-3 text-positive" />}
+          icon={<CallReceivedOutlined sx={{ color: "success.main" }} />}
           value={hasIncome ? formatGBP(incomeMonthly) : "—"}
           sub={
             hasIncome
@@ -297,9 +311,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <Kpi
           size="lg"
           label="Committed"
-          icon={<ArrowUpRight className="size-3 text-negative" />}
+          icon={<CallMadeOutlined sx={{ color: "error.main" }} />}
           value={formatGBP(outflowMonthly)}
-          sub={`${outItems.length} item${outItems.length === 1 ? "" : "s"} · ${pots.length} pots`}
+          sub={`${outItems.length} item${outItems.length === 1 ? "" : "s"} · ${pots.length} pot${pots.length === 1 ? "" : "s"}`}
           tone="negative"
         />
         <Kpi
@@ -311,17 +325,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               ? discretionary >= 0
                 ? "After committed outflow"
                 : "Outflow exceeds income"
-              : "—"
+              : "Add income to see this"
           }
-          tone={
-            !hasIncome ? "muted" : discretionary < 0 ? "negative" : "neutral"
-          }
-          emphasised
+          // The emphasised tile ignores tone, so drop the emphasis when
+          // over budget and let the error colour carry the message.
+          tone={!hasIncome ? "muted" : overBudget ? "negative" : "neutral"}
+          emphasised={!overBudget}
         />
         <Kpi
           size="lg"
           label="To save"
-          icon={<PiggyBank className="size-3 text-primary" />}
+          icon={<SavingsOutlined sx={{ color: "primary.main" }} />}
           value={
             hasIncome && discretionary > 0
               ? formatGBP(suggestedSavings + suggestedInvest)
@@ -330,335 +344,359 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           sub={`Suggested · ${Math.round((settings.savingsPercent + settings.investPercent) * 100)}% of left over`}
           tone={hasIncome && discretionary > 0 ? "primary" : "muted"}
         />
-      </div>
+      </KpiGrid>
 
-      {/* Main row: allocation + discretionary plan */}
-      <div className="grid grid-cols-12 gap-5">
-        {/* Pot Allocation panel */}
-        <div className="col-span-7 rounded-md border bg-card p-5">
-          <div className="flex items-baseline justify-between mb-4">
-            <div>
-              <p className="label-eyebrow">Pot allocation</p>
-              <h2 className="text-base font-semibold mt-1">
-                Where your outflow goes
-              </h2>
-            </div>
-            <Link
-              href="/recurring"
-              className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            >
-              View ledger →
-            </Link>
-          </div>
+      {/* ── Allocation + smart split ─────────────────────────────── */}
+      <Box sx={TWO_COL}>
+        <Card component="section" aria-labelledby="dash-allocation">
+          <PanelHeader
+            eyebrow="Pot allocation"
+            title="Where your outflow goes"
+            id="dash-allocation"
+            meta={<LinkButton href="/recurring">View ledger</LinkButton>}
+          />
           {pots.length === 0 ? (
             <EmptyPanel
               message="Add some recurring outgoings to see your allocation."
-              cta={{ href: "/recurring", label: "Add an item" }}
+              action={<LinkButton href="/recurring">Add an item</LinkButton>}
             />
           ) : (
-            <div className="flex items-center gap-6">
-              <AllocationChart data={potSlices} size={200} />
-              <ul className="flex-1 grid grid-cols-1 gap-1.5 min-w-0">
-                {potSlices.map((slice) => {
-                  const pct = (slice.total / outflowMonthly) * 100;
-                  return (
-                    <li
+            <CardContent>
+              <Box
+                sx={{
+                  display: "grid",
+                  gap: 2,
+                  alignItems: "center",
+                  gridTemplateColumns: {
+                    xs: "minmax(0, 1fr)",
+                    sm: "minmax(200px, 240px) minmax(0, 1fr)",
+                  },
+                }}
+              >
+                <AllocationChart data={potSlices} height={240} />
+                <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0, minWidth: 0 }}>
+                  {potSlices.map((slice) => (
+                    <SplitRow
                       key={slice.category}
-                      className="grid grid-cols-[10px_1fr_auto_auto] items-center gap-2.5 text-[12px]"
-                    >
-                      <span
-                        className="size-2 rounded-[1px]"
-                        style={{ background: slice.color }}
-                      />
-                      <span className="truncate font-medium">
-                        {slice.category}
-                      </span>
-                      <span className="text-muted-foreground tabular-nums w-10 text-right text-[11px]">
-                        {pct.toFixed(0)}%
-                      </span>
-                      <span className="font-mono tabular-nums w-16 text-right">
-                        {formatGBP(slice.total)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
+                      color={slice.color}
+                      label={slice.category}
+                      pct={shareOf(slice.total)}
+                      value={formatGBP(slice.total)}
+                    />
+                  ))}
+                </Box>
+              </Box>
+            </CardContent>
           )}
-        </div>
+        </Card>
 
-        {/* Discretionary panel */}
-        <div className="col-span-5 rounded-md border bg-card p-5">
-          <div className="flex items-baseline justify-between mb-4">
-            <div>
-              <p className="label-eyebrow">Smart allocation</p>
-              <h2 className="text-base font-semibold mt-1">
-                After bills are paid
-              </h2>
-            </div>
-            <Sparkles className="size-3.5 text-primary" />
-          </div>
-
+        <Card component="section" aria-labelledby="dash-split">
+          <PanelHeader
+            eyebrow="Smart allocation"
+            title="After bills are paid"
+            id="dash-split"
+            meta={<AutoAwesomeOutlined fontSize="small" sx={{ color: "primary.main" }} />}
+          />
           {!hasIncome ? (
             <EmptyPanel
-              message={`Record income for ${format(budgetMonth, "MMMM")} to unlock the savings, investments and free-spend split.`}
-              cta={{ href: `/income?month=${monthIso}`, label: "Add income" }}
+              message={`Record income for ${monthName} to unlock the savings, investments and free-spend split.`}
+              action={<LinkButton href={`/income?month=${monthIso}`}>Add income</LinkButton>}
             />
           ) : discretionary <= 0 ? (
-            <div className="rounded-md bg-negative/10 border border-negative/20 p-4 text-[13px]">
-              <p className="font-medium text-negative">
-                You&apos;re over budget by {formatGBP(Math.abs(discretionary))}
-                /mo.
-              </p>
-              <p className="text-muted-foreground mt-1.5 text-[12px]">
-                Trim a recurring outflow or increase income before allocating
-                savings.
-              </p>
-            </div>
+            <CardContent>
+              <Alert severity="error" icon={false}>
+                <Typography variant="subtitle2" component="p">
+                  You&apos;re over budget by {formatGBP(Math.abs(discretionary))}/mo.
+                </Typography>
+                <Typography variant="body2" sx={{ mt: 0.5 }}>
+                  Trim a recurring outflow or increase income before allocating savings.
+                </Typography>
+              </Alert>
+            </CardContent>
           ) : (
-            <DiscretionaryBreakdown
-              total={discretionary}
-              savings={suggestedSavings}
-              invest={suggestedInvest}
-              free={suggestedFree}
+            <CardContent>
+              <DiscretionaryBreakdown
+                total={discretionary}
+                savings={suggestedSavings}
+                invest={suggestedInvest}
+                free={suggestedFree}
+              />
+            </CardContent>
+          )}
+        </Card>
+      </Box>
+
+      {/* ── Events + accounts ────────────────────────────────────── */}
+      <Box sx={TWO_COL}>
+        <Card component="section" aria-labelledby="dash-events">
+          <PanelHeader
+            eyebrow="Birthdays & events"
+            title={`${monthName} ahead`}
+            id="dash-events"
+            meta={
+              monthEvents.length === 0 ? null : (
+                <>
+                  <Chip
+                    size="small"
+                    variant="outlined"
+                    label={`${monthEvents.length} item${monthEvents.length === 1 ? "" : "s"}`}
+                  />
+                  <Typography
+                    variant="subtitle2"
+                    component="p"
+                    className="tabular"
+                    sx={{ whiteSpace: "nowrap" }}
+                  >
+                    {formatGBP(eventsTotal)}
+                  </Typography>
+                </>
+              )
+            }
+          />
+          {monthEvents.length === 0 ? (
+            <EmptyPanel
+              message="Nothing scheduled this month."
+              action={<LinkButton href="/calendar">Add an event</LinkButton>}
+            />
+          ) : (
+            <DataList<EventRow>
+              rows={eventRows}
+              getKey={(e) => e.key}
+              size="small"
+              columns={[
+                {
+                  id: "date",
+                  header: "Date",
+                  nowrap: true,
+                  numeric: true,
+                  width: 96,
+                  render: (e) => format(e.date, "EEE d"),
+                },
+                {
+                  id: "title",
+                  header: "Event",
+                  render: (e) => (
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                      <EventKindIcon kind={e.kind} />
+                      <Typography variant="body2" noWrap>
+                        {e.title}
+                      </Typography>
+                    </Box>
+                  ),
+                },
+                {
+                  id: "importance",
+                  header: "Importance",
+                  render: (e) => <ImportanceChip importance={e.importance} />,
+                },
+                {
+                  id: "amount",
+                  header: "Budget",
+                  align: "right",
+                  numeric: true,
+                  render: (e) => (
+                    <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                      {formatGBP(e.amount)}
+                    </Typography>
+                  ),
+                },
+              ]}
+              mobile={{
+                title: (e) => e.title,
+                meta: (e) => (
+                  <Meta>
+                    {format(e.date, "EEE d")}
+                    {e.kind === "BIRTHDAY" ? "Birthday" : "Event"}
+                    {e.importance ? IMPORTANCE_LABELS[e.importance] : null}
+                  </Meta>
+                ),
+                value: (e) => formatGBP(e.amount),
+              }}
             />
           )}
-        </div>
-      </div>
+        </Card>
 
-      {/* Bottom row: events + accounts */}
-      <div className="grid grid-cols-12 gap-5">
-        {/* This month's events */}
-        <div className="col-span-7 rounded-md border bg-card p-5">
-          <div className="flex items-baseline justify-between mb-3.5">
-            <div>
-              <p className="label-eyebrow">Birthdays &amp; events</p>
-              <h2 className="text-base font-semibold mt-1">
-                {format(budgetMonth, "MMMM")} ahead
-              </h2>
-            </div>
-            <span className="label-eyebrow tabular-nums">
-              {monthEvents.length === 0
-                ? "—"
-                : `${monthEvents.length} item${monthEvents.length === 1 ? "" : "s"} · ${formatGBP(eventsTotal)}`}
-            </span>
-          </div>
-          {monthEvents.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-[13px] text-muted-foreground mb-2">
-                Nothing scheduled this month.
-              </p>
-              <Link
-                href="/calendar"
-                className="text-[12px] font-medium text-primary hover:underline underline-offset-4"
-              >
-                Add an event →
-              </Link>
-            </div>
-          ) : (
-            <ul className="divide-y -mx-5 px-5">
-              {monthEvents.map((e, i) => (
-                <li
-                  key={`${e.kind}-${i}`}
-                  className="grid grid-cols-[28px_60px_1fr_auto_auto] items-center gap-3 py-2"
-                >
-                  <span
-                    className={`flex items-center justify-center size-6 rounded-md ${
-                      e.kind === "BIRTHDAY"
-                        ? "bg-primary/10 text-primary"
-                        : "bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    {e.kind === "BIRTHDAY" ? (
-                      <Cake className="size-3" />
-                    ) : (
-                      <CalendarDays className="size-3" />
-                    )}
-                  </span>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground tabular-nums">
-                    {format(e.date, "EEE d")}
-                  </span>
-                  <span className="text-[13px] truncate">{e.title}</span>
-                  {e.importance ? (
-                    <span
-                      className={`rounded-sm text-[9px] uppercase tracking-wider font-medium px-1.5 py-0.5 ${
-                        e.importance === "HIGH"
-                          ? "bg-primary/15 text-primary"
-                          : e.importance === "MEDIUM"
-                            ? "bg-accent/20 text-accent-foreground"
-                            : "bg-muted text-muted-foreground"
-                      }`}
-                    >
-                      {e.importance.toLowerCase()}
-                    </span>
-                  ) : (
-                    <span />
-                  )}
-                  <span className="font-mono tabular-nums text-[13px] w-16 text-right">
-                    {formatGBP(e.amount)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* By account */}
-        <div className="col-span-5 rounded-md border bg-card p-5">
-          <div className="flex items-baseline justify-between mb-3.5">
-            <div>
-              <p className="label-eyebrow">Funded by</p>
-              <h2 className="text-base font-semibold mt-1">
-                By account
-              </h2>
-            </div>
-            <span className="label-eyebrow tabular-nums">
-              {accounts.length}{" "}
-              account{accounts.length === 1 ? "" : "s"}
-            </span>
-          </div>
+        <Card component="section" aria-labelledby="dash-accounts">
+          <PanelHeader
+            eyebrow="Funded by"
+            title="By account"
+            id="dash-accounts"
+            meta={
+              <Chip
+                size="small"
+                variant="outlined"
+                label={`${accounts.length} account${accounts.length === 1 ? "" : "s"}`}
+              />
+            }
+          />
           {accounts.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground py-6 text-center">
-              No funding accounts assigned yet.
-            </p>
+            <EmptyPanel message="No funding accounts assigned yet." />
           ) : (
-            <ul className="space-y-2">
-              {accounts.map((a) => {
-                const pct = (a.total / outflowMonthly) * 100;
-                return (
-                  <li key={a.name} className="space-y-1">
-                    <div className="flex items-baseline justify-between gap-2 text-[12px]">
-                      <span className="font-medium truncate">{a.name}</span>
-                      <span className="font-mono tabular-nums">
-                        {formatGBP(a.total)}
-                      </span>
-                    </div>
-                    <div className="h-1 w-full bg-muted rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary"
-                        style={{ width: `${pct}%` }}
+            <CardContent>
+              <Stack component="ul" spacing={1.5} sx={{ listStyle: "none", m: 0, p: 0 }}>
+                {accounts.map((a) => {
+                  const pct = shareOf(a.total);
+                  return (
+                    <Box component="li" key={a.name}>
+                      <Box
+                        sx={{
+                          display: "flex",
+                          alignItems: "baseline",
+                          justifyContent: "space-between",
+                          gap: 2,
+                          mb: 0.75,
+                        }}
+                      >
+                        <Typography variant="body2" noWrap sx={{ fontWeight: 500, minWidth: 0 }}>
+                          {a.name}
+                        </Typography>
+                        <Typography variant="body2" className="tabular" sx={{ whiteSpace: "nowrap" }}>
+                          {formatGBP(a.total)}
+                        </Typography>
+                      </Box>
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min(100, pct)}
+                        aria-label={`${a.name}: ${pct.toFixed(0)}% of committed outflow`}
                       />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                    </Box>
+                  );
+                })}
+              </Stack>
+            </CardContent>
           )}
-        </div>
-      </div>
+        </Card>
+      </Box>
 
-      {/* Upcoming renewals */}
-      <div className="grid grid-cols-12 gap-5">
-        <div className="col-span-12 rounded-md border bg-card p-5">
-          <div className="flex items-baseline justify-between mb-3.5">
-            <div>
-              <p className="label-eyebrow">Life admin</p>
-              <h2 className="text-base font-semibold mt-1">
-                Upcoming renewals
-              </h2>
-            </div>
-            <Link
-              href="/renewals"
-              className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            >
-              View all →
-            </Link>
-          </div>
-          {upcomingRenewals.length === 0 ? (
-            <div className="py-8 text-center">
-              <p className="text-[13px] text-muted-foreground mb-2">
-                Nothing due in the next {RENEWAL_HORIZON_DAYS} days.
-              </p>
-              <Link
-                href="/renewals"
-                className="text-[12px] font-medium text-primary hover:underline underline-offset-4"
-              >
-                Track a renewal →
-              </Link>
-            </div>
-          ) : (
-            <ul className="divide-y -mx-5 px-5">
-              {upcomingRenewals.map(({ renewal, status, days }) => (
-                <li
-                  key={renewal.id}
-                  className="grid grid-cols-[24px_64px_1fr_auto_auto] items-center gap-3 py-2"
-                >
-                  <span className="flex items-center justify-center size-6 rounded-md bg-primary/10 text-primary">
-                    <CalendarClock className="size-3" />
-                  </span>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground tabular-nums">
-                    {format(renewal.dueDate, "d MMM")}
-                  </span>
-                  <span className="text-[13px] truncate">
-                    {renewal.title}
-                    <span className="text-muted-foreground">
-                      {" · "}
-                      {renewal.category}
-                      {renewal.subject ? ` · ${renewal.subject}` : ""}
-                    </span>
-                  </span>
-                  <span
-                    className={`text-[10px] uppercase tracking-wider tabular-nums text-right ${
-                      status === "overdue"
-                        ? "text-negative"
-                        : status === "due-soon"
-                          ? "text-primary"
-                          : "text-muted-foreground"
-                    }`}
-                  >
-                    {dueLabel(days)}
-                  </span>
-                  <span className="font-mono tabular-nums text-[13px] w-16 text-right">
-                    {renewal.cost != null ? formatGBP(renewal.cost) : "—"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </div>
+      {/* ── Upcoming renewals ────────────────────────────────────── */}
+      <Card component="section" aria-labelledby="dash-renewals">
+        <PanelHeader
+          eyebrow="Life admin"
+          title="Upcoming renewals"
+          id="dash-renewals"
+          meta={<LinkButton href="/renewals">View all</LinkButton>}
+        />
+        {upcomingRenewals.length === 0 ? (
+          <EmptyPanel
+            message={`Nothing due in the next ${RENEWAL_HORIZON_DAYS} days.`}
+            action={<LinkButton href="/renewals">Track a renewal</LinkButton>}
+          />
+        ) : (
+          <DataList<RenewalRow>
+            rows={upcomingRenewals}
+            getKey={(r) => r.renewal.id}
+            size="small"
+            columns={[
+              {
+                id: "due",
+                header: "Due",
+                nowrap: true,
+                numeric: true,
+                width: 96,
+                render: (r) => format(r.renewal.dueDate, "d MMM"),
+              },
+              {
+                id: "title",
+                header: "Renewal",
+                render: (r) => (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                    <Box
+                      aria-hidden
+                      sx={{
+                        display: "flex",
+                        p: 0.75,
+                        borderRadius: 2,
+                        bgcolor: "m3.primaryContainer",
+                        color: "m3.onPrimaryContainer",
+                        flexShrink: 0,
+                        "& svg": { fontSize: 16 },
+                      }}
+                    >
+                      <EventAvailableOutlined />
+                    </Box>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
+                        {r.renewal.title}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap component="p">
+                        {r.renewal.category}
+                        {r.renewal.subject ? ` · ${r.renewal.subject}` : ""}
+                      </Typography>
+                    </Box>
+                  </Box>
+                ),
+              },
+              {
+                id: "status",
+                header: "Status",
+                nowrap: true,
+                render: (r) => (
+                  <Typography variant="body2" component="span" sx={{ color: DUE_COLOR[r.status] }}>
+                    {dueLabel(r.days)}
+                  </Typography>
+                ),
+              },
+              {
+                id: "cost",
+                header: "Cost",
+                align: "right",
+                numeric: true,
+                render: (r) => (r.renewal.cost != null ? formatGBP(r.renewal.cost) : "—"),
+              },
+            ]}
+            mobile={{
+              title: (r) => r.renewal.title,
+              meta: (r) => (
+                <Meta>
+                  {format(r.renewal.dueDate, "d MMM")}
+                  {r.renewal.category}
+                  {r.renewal.subject}
+                </Meta>
+              ),
+              value: (r) => (r.renewal.cost != null ? formatGBP(r.renewal.cost) : "—"),
+              valueSub: (r) => (
+                <Box component="span" sx={{ color: DUE_COLOR[r.status] }}>
+                  {dueLabel(r.days)}
+                </Box>
+              ),
+            }}
+          />
+        )}
+      </Card>
+    </>
   );
 }
 
-function MonthNav({
-  prevIso,
-  nextIso,
-  isCurrent,
-}: {
-  prevIso: string;
-  nextIso: string;
-  isCurrent: boolean;
-}) {
-  const todayIso = currentMonthIso();
+function EventKindIcon({ kind }: { kind: MonthEvent["kind"] }) {
+  const birthday = kind === "BIRTHDAY";
   return (
-    <div className="flex items-center gap-1">
-      <Link
-        href={`/dashboard?month=${prevIso}`}
-        className="size-8 rounded-md border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50"
-        aria-label="Previous month"
-      >
-        <ChevronLeft className="size-3.5" />
-      </Link>
-      <Link
-        href={`/dashboard?month=${nextIso}`}
-        className="size-8 rounded-md border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/50"
-        aria-label="Next month"
-      >
-        <ChevronRight className="size-3.5" />
-      </Link>
-      {!isCurrent && (
-        <Link
-          href={`/dashboard?month=${todayIso}`}
-          className="ml-2 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-        >
-          Today
-        </Link>
-      )}
-    </div>
+    <Box
+      aria-hidden
+      sx={{
+        display: "flex",
+        p: 0.75,
+        borderRadius: 2,
+        flexShrink: 0,
+        bgcolor: birthday ? "m3.primaryContainer" : "m3.surfaceContainerHighest",
+        color: birthday ? "m3.onPrimaryContainer" : "text.secondary",
+        "& svg": { fontSize: 16 },
+      }}
+    >
+      {birthday ? <CakeOutlined /> : <EventOutlined />}
+    </Box>
   );
 }
 
+function ImportanceChip({ importance }: { importance: ImportanceLevel | null }) {
+  if (!importance) return <>—</>;
+  return (
+    <Chip
+      size="small"
+      variant={importance === "HIGH" ? "filled" : "outlined"}
+      label={IMPORTANCE_LABELS[importance]}
+    />
+  );
+}
 
 function DiscretionaryBreakdown({
   total,
@@ -671,94 +709,59 @@ function DiscretionaryBreakdown({
   invest: number;
   free: number;
 }) {
-  const segments: { label: string; value: number; color: string }[] = [
-    { label: "Savings", value: savings, color: "var(--chart-1)" },
-    { label: "Investments", value: invest, color: "var(--chart-3)" },
-    { label: "Free spend", value: free, color: "var(--chart-2)" },
+  const segments = [
+    { label: "Savings", value: savings, color: categoryColor(0) },
+    { label: "Investments", value: invest, color: categoryColor(1) },
+    { label: "Free spend", value: free, color: categoryColor(2) },
   ];
 
   return (
-    <div className="space-y-4">
-      <div>
-        <p className="font-mono text-3xl tabular-nums tracking-[-0.02em]">
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h3" component="p" className="tabular">
           {formatGBP(total)}
-        </p>
-        <p className="text-[11px] text-muted-foreground mt-1">
+        </Typography>
+        <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.5 }}>
           Discretionary monthly
-        </p>
-      </div>
+        </Typography>
+      </Box>
 
-      {/* Stacked bar */}
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
+      {/* Stacked share bar */}
+      <Box
+        aria-hidden
+        sx={{
+          display: "flex",
+          height: 10,
+          borderRadius: 5,
+          overflow: "hidden",
+          bgcolor: "m3.surfaceContainerHighest",
+        }}
+      >
         {segments.map((s) => (
-          <div
+          <Box key={s.label} sx={{ width: `${(s.value / total) * 100}%`, bgcolor: s.color }} />
+        ))}
+      </Box>
+
+      <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0 }}>
+        {segments.map((s) => (
+          <SplitRow
             key={s.label}
-            className="h-full"
-            style={{
-              width: `${(s.value / total) * 100}%`,
-              background: s.color,
-            }}
-            title={`${s.label} — ${formatGBP(s.value)}`}
+            color={s.color}
+            label={s.label}
+            pct={(s.value / total) * 100}
+            value={formatGBP(s.value)}
           />
         ))}
-      </div>
+      </Box>
 
-      {/* Lines */}
-      <ul className="space-y-1.5">
-        {segments.map((s) => {
-          const pct = (s.value / total) * 100;
-          return (
-            <li
-              key={s.label}
-              className="grid grid-cols-[10px_1fr_auto_auto] items-center gap-2.5 text-[12px]"
-            >
-              <span
-                className="size-2 rounded-[1px]"
-                style={{ background: s.color }}
-              />
-              <span className="font-medium">{s.label}</span>
-              <span className="text-muted-foreground tabular-nums w-10 text-right text-[11px]">
-                {pct.toFixed(0)}%
-              </span>
-              <span className="font-mono tabular-nums w-16 text-right">
-                {formatGBP(s.value)}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-
-      <p className="text-[11px] text-muted-foreground border-t pt-3">
-        Suggested split. Adjust in{" "}
-        <Link href="/settings" className="text-primary hover:underline underline-offset-4">
-          settings
-        </Link>
-        .
-      </p>
-    </div>
-  );
-}
-
-function EmptyPanel({
-  message,
-  cta,
-}: {
-  message: string;
-  cta?: { href: string; label: string };
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center min-h-[180px]">
-      <p className="text-[13px] text-muted-foreground mb-3 max-w-xs">
-        {message}
-      </p>
-      {cta ? (
-        <Link
-          href={cta.href}
-          className="text-[12px] font-medium text-primary hover:underline underline-offset-4"
-        >
-          {cta.label} →
-        </Link>
-      ) : null}
-    </div>
+      <Typography
+        variant="caption"
+        color="text.secondary"
+        component="p"
+        sx={{ pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}
+      >
+        Suggested split. Adjust in <TextLink href="/settings">settings</TextLink>.
+      </Typography>
+    </Stack>
   );
 }

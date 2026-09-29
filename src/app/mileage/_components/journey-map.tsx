@@ -2,6 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import type * as LeafletNS from "leaflet";
+import Box from "@mui/material/Box";
+import { useTheme } from "@mui/material/styles";
+import { useAppTheme } from "@/components/theme-registry";
 import "leaflet/dist/leaflet.css";
 
 export interface TripLeg {
@@ -12,24 +15,38 @@ export interface TripLeg {
   endLon: number;
 }
 
-export function JourneyMap({
-  legs,
-  variant = "overview",
-  heightClass = "h-80",
-}: {
+interface Props {
   legs: TripLeg[];
+  /** `detail` draws one trip larger; `overview` fits many legs. */
   variant?: "overview" | "detail";
-  heightClass?: string;
-}) {
+  /** Fixed height or a responsive map, e.g. `{ xs: 320, md: 420 }`. */
+  height?: number | Partial<Record<"xs" | "sm" | "md" | "lg" | "xl", number>>;
+}
+
+const LIGHT_TILES = {
+  url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  attribution: "&copy; OpenStreetMap contributors",
+};
+const DARK_TILES = {
+  url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+};
+
+/**
+ * Leaflet map of trip legs (start -> end). Leaflet touches `window`, so
+ * it is imported inside the effect and never during server rendering.
+ */
+export function JourneyMap({ legs, variant = "overview", height = { xs: 320, md: 420 } }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const theme = useTheme();
+  // Re-run the effect when the scheme flips so the tiles follow it.
+  const { isDark } = useAppTheme();
 
   useEffect(() => {
     let map: LeafletNS.Map | undefined;
     let cancelled = false;
 
     (async () => {
-      // Loaded here (not at module scope) so Leaflet's window access never
-      // runs during server rendering.
       const L = (await import("leaflet")).default;
       if (cancelled || !ref.current) return;
 
@@ -37,14 +54,20 @@ export function JourneyMap({
         scrollWheelZoom: false,
         attributionControl: true,
       });
-      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "&copy; OpenStreetMap contributors",
-      }).addTo(map);
 
-      const css = getComputedStyle(document.documentElement);
-      const primary = css.getPropertyValue("--primary").trim() || "#003A6C";
-      const accent = css.getPropertyValue("--accent").trim() || "#FD8973";
+      // Read the rendered scheme from the DOM rather than the hook so the
+      // first paint is right even before MUI has hydrated its mode.
+      const root = document.documentElement;
+      const dark = root.getAttribute("data-mui-color-scheme") === "dark" || isDark;
+      const tiles = dark ? DARK_TILES : LIGHT_TILES;
+      L.tileLayer(tiles.url, { maxZoom: 19, attribution: tiles.attribution }).addTo(map);
+
+      // Marker colours from the live M3 CSS variables (fall back to the palette).
+      const css = getComputedStyle(root);
+      const role = (name: "primary" | "tertiary") =>
+        css.getPropertyValue(`--mui-palette-m3-${name}`).trim() || theme.palette.m3[name];
+      const primary = role("primary");
+      const accent = role("tertiary");
 
       const detail = variant === "detail";
       const radius = detail ? 6 : 3;
@@ -59,20 +82,8 @@ export function JourneyMap({
           weight: detail ? 3 : 2,
           opacity: detail ? 0.8 : 0.55,
         }).addTo(map);
-        L.circleMarker(a, {
-          radius,
-          color: primary,
-          fillColor: primary,
-          fillOpacity: 1,
-          weight,
-        }).addTo(map);
-        L.circleMarker(b, {
-          radius,
-          color: accent,
-          fillColor: accent,
-          fillOpacity: 1,
-          weight,
-        }).addTo(map);
+        L.circleMarker(a, { radius, color: primary, fillColor: primary, fillOpacity: 1, weight }).addTo(map);
+        L.circleMarker(b, { radius, color: accent, fillColor: accent, fillOpacity: 1, weight }).addTo(map);
         pts.push(a, b);
       }
 
@@ -82,7 +93,7 @@ export function JourneyMap({
         map.setView([55.86, -4.25], 11);
       }
 
-      // The container may still be settling (e.g. inside a sliding sheet);
+      // The container may still be settling (e.g. inside a sliding drawer);
       // recompute size once it has.
       setTimeout(() => {
         if (!cancelled && map) map.invalidateSize();
@@ -93,12 +104,21 @@ export function JourneyMap({
       cancelled = true;
       if (map) map.remove();
     };
-  }, [legs, variant]);
+  }, [legs, variant, isDark, theme]);
 
   return (
-    <div
+    <Box
       ref={ref}
-      className={`isolate relative z-0 ${heightClass} w-full rounded-md overflow-hidden border`}
+      sx={{
+        position: "relative",
+        isolation: "isolate",
+        zIndex: 0,
+        width: "100%",
+        height,
+        borderRadius: 3,
+        overflow: "hidden",
+        bgcolor: "m3.surfaceContainerHigh",
+      }}
     />
   );
 }

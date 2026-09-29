@@ -1,29 +1,20 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import Autocomplete from "@mui/material/Autocomplete";
+import Box from "@mui/material/Box";
+import FormControlLabel from "@mui/material/FormControlLabel";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import MenuItem from "@mui/material/MenuItem";
+import Stack from "@mui/material/Stack";
+import Switch from "@mui/material/Switch";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import { toast } from "@/components/toast";
+import { FormDialog } from "@/components/form-dialog";
+import { ResponsiveAction } from "@/components/responsive-action";
 import {
   RENEWAL_CATEGORIES,
   RENEWAL_RECURRENCES,
@@ -31,7 +22,7 @@ import {
 } from "@/lib/admin";
 import { createRenewal, updateRenewal } from "../actions";
 
-interface InitialRenewal {
+export interface InitialRenewal {
   id: string;
   title: string;
   category: string;
@@ -47,57 +38,33 @@ interface InitialRenewal {
 }
 
 interface Props {
+  /** When set, the dialog edits this renewal and the trigger is an edit icon. */
   initial?: InitialRenewal;
+  /** Existing subjects offered by the Subject autocomplete. */
   subjectOptions?: string[];
-  triggerLabel?: string;
-  triggerVariant?: "default" | "ghost" | "outline";
+  /** For the create trigger: render as a FAB on phones (default) or a plain button. */
+  fabOnMobile?: boolean;
 }
 
-export function RenewalDialog({
-  initial,
-  subjectOptions = [],
-  triggerLabel,
-  triggerVariant = "default",
-}: Props) {
+export function RenewalDialog({ initial, subjectOptions = [], fabOnMobile = true }: Props) {
   const [open, setOpen] = useState(false);
   const isEdit = Boolean(initial);
 
-  const triggerContent = isEdit ? (
-    triggerLabel ?? "Edit"
-  ) : (
-    <>
-      <Plus className="size-4" />
-      {triggerLabel ?? "New renewal"}
-    </>
-  );
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant={triggerVariant} size={isEdit ? "sm" : "default"} />
-        }
-      >
-        {triggerContent}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit renewal" : "New renewal"}</DialogTitle>
-          <DialogDescription>
-            Insurance, MOT, service, tax, a warranty or document expiry —
-            anything with a renewal date.
-          </DialogDescription>
-        </DialogHeader>
-        {open && (
-          <RenewalForm
-            initial={initial}
-            subjectOptions={subjectOptions}
-            isEdit={isEdit}
-            onDone={() => setOpen(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <>
+      {isEdit ? (
+        <Tooltip title={`Edit ${initial!.title}`}>
+          <IconButton size="small" aria-label={`Edit ${initial!.title}`} onClick={() => setOpen(true)}>
+            <EditOutlined fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <ResponsiveAction label="New renewal" onClick={() => setOpen(true)} fabOnMobile={fabOnMobile} />
+      )}
+      {open ? (
+        <RenewalForm initial={initial} subjectOptions={subjectOptions} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
   );
 }
 
@@ -113,220 +80,184 @@ function dateInputValue(d: Date | null | undefined): string {
 interface FormProps {
   initial?: InitialRenewal;
   subjectOptions: string[];
-  isEdit: boolean;
-  onDone: () => void;
+  onClose: () => void;
 }
 
-function RenewalForm({ initial, subjectOptions, isEdit, onDone }: FormProps) {
+function RenewalForm({ initial, subjectOptions, onClose }: FormProps) {
+  const isEdit = Boolean(initial);
   const [title, setTitle] = useState(initial?.title ?? "");
-  const [category, setCategory] = useState(
-    initial?.category ?? RENEWAL_CATEGORIES[0],
-  );
+  const [category, setCategory] = useState<string>(initial?.category ?? RENEWAL_CATEGORIES[0]);
   const [subject, setSubject] = useState(initial?.subject ?? "");
   const [provider, setProvider] = useState(initial?.provider ?? "");
   const [reference, setReference] = useState(initial?.reference ?? "");
   const [dueDate, setDueDate] = useState(dateInputValue(initial?.dueDate));
-  const [cost, setCost] = useState(
-    initial?.cost != null ? String(initial.cost) : "",
-  );
+  const [cost, setCost] = useState(initial?.cost != null ? String(initial.cost) : "");
   const [recurrence, setRecurrence] = useState(initial?.recurrence ?? "ANNUAL");
   const [reminderDays, setReminderDays] = useState(
     initial?.reminderDays != null ? String(initial.reminderDays) : "30",
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [active, setActive] = useState(initial?.active ?? true);
-
   const [pending, startTransition] = useTransition();
+
+  const valid = title.trim().length > 0 && dueDate !== "";
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    formData.set("active", active ? "true" : "false");
+    if (!valid) return;
+    // Field names match renewalSchema in src/lib/validation.ts.
+    const fd = new FormData();
+    fd.set("title", title.trim());
+    fd.set("category", category);
+    fd.set("subject", subject.trim());
+    fd.set("provider", provider.trim());
+    fd.set("reference", reference.trim());
+    fd.set("dueDate", dueDate);
+    fd.set("cost", cost);
+    fd.set("recurrence", recurrence);
+    fd.set("reminderDays", reminderDays);
+    fd.set("notes", notes.trim());
+    fd.set("active", active ? "true" : "false");
 
     startTransition(async () => {
       try {
         if (initial) {
-          await updateRenewal(initial.id, formData);
-          toast.success("Updated");
+          await updateRenewal(initial.id, fd);
+          toast.success("Updated", title.trim());
         } else {
-          await createRenewal(formData);
-          toast.success("Created");
+          await createRenewal(fd);
+          toast.success("Created", title.trim());
         }
-        onDone();
+        onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+        toast.error("Could not save", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="title">Title</Label>
-        <Input
-          id="title"
-          name="title"
+    <FormDialog
+      open
+      onClose={onClose}
+      title={isEdit ? "Edit renewal" : "New renewal"}
+      description="Insurance, MOT, service, tax, a warranty or document expiry — anything with a renewal date."
+      onSubmit={onSubmit}
+      submitLabel={isEdit ? "Save" : "Create"}
+      pending={pending}
+      submitDisabled={!valid}
+    >
+      <Stack spacing={2.5}>
+        <TextField
+          label="Title"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="e.g. Car insurance"
           required
-          maxLength={120}
           autoFocus
+          slotProps={{ htmlInput: { maxLength: 120 } }}
         />
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="category">Category</Label>
-          <Select
-            name="category"
-            value={category}
-            onValueChange={(v) => setCategory(v ?? RENEWAL_CATEGORIES[0])}
-          >
-            <SelectTrigger id="category" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RENEWAL_CATEGORIES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="subject">Subject</Label>
-          <Input
-            id="subject"
-            name="subject"
-            list="renewal-subject-options"
-            placeholder="e.g. Honda Civic, Home"
-            value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            maxLength={120}
-          />
-          <datalist id="renewal-subject-options">
-            {subjectOptions.map((s) => (
-              <option key={s} value={s} />
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField select label="Category" value={category} onChange={(e) => setCategory(e.target.value)}>
+            {RENEWAL_CATEGORIES.map((c) => (
+              <MenuItem key={c} value={c}>
+                {c}
+              </MenuItem>
             ))}
-          </datalist>
-        </div>
-      </div>
+          </TextField>
+          <Autocomplete
+            freeSolo
+            options={subjectOptions}
+            inputValue={subject}
+            onInputChange={(_, v) => setSubject(v)}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Subject"
+                placeholder="e.g. Honda Civic, Home"
+                helperText="Optional — groups related renewals"
+              />
+            )}
+          />
+        </Box>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="dueDate">Due date</Label>
-          <Input
-            id="dueDate"
-            name="dueDate"
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField
+            label="Due date"
             type="date"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
             required
+            slotProps={{ inputLabel: { shrink: true } }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="recurrence">Recurrence</Label>
-          <Select
-            name="recurrence"
-            value={recurrence}
-            onValueChange={(v) => setRecurrence(v ?? "ANNUAL")}
-          >
-            <SelectTrigger id="recurrence" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {RENEWAL_RECURRENCES.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {RENEWAL_RECURRENCE_LABELS[r]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+          <TextField select label="Recurrence" value={recurrence} onChange={(e) => setRecurrence(e.target.value)}>
+            {RENEWAL_RECURRENCES.map((r) => (
+              <MenuItem key={r} value={r}>
+                {RENEWAL_RECURRENCE_LABELS[r]}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Box>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="cost">Cost (£)</Label>
-          <Input
-            id="cost"
-            name="cost"
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField
+            label="Cost"
             type="number"
-            step="0.01"
-            min="0"
-            placeholder="optional"
+            inputMode="decimal"
             value={cost}
             onChange={(e) => setCost(e.target.value)}
+            helperText="Optional"
+            slotProps={{
+              input: { startAdornment: <InputAdornment position="start">£</InputAdornment> },
+              htmlInput: { min: 0, step: 0.01 },
+            }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="reminderDays">Remind me (days before)</Label>
-          <Input
-            id="reminderDays"
-            name="reminderDays"
+          <TextField
+            label="Remind me"
             type="number"
-            min={0}
-            max={3650}
+            inputMode="numeric"
             value={reminderDays}
             onChange={(e) => setReminderDays(e.target.value)}
+            helperText="Flags as due soon this many days ahead"
+            slotProps={{
+              input: { endAdornment: <InputAdornment position="end">days before</InputAdornment> },
+              htmlInput: { min: 0, max: 3650 },
+            }}
           />
-        </div>
-      </div>
+        </Box>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="provider">Provider</Label>
-          <Input
-            id="provider"
-            name="provider"
-            placeholder="e.g. Aviva"
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField
+            label="Provider"
             value={provider}
             onChange={(e) => setProvider(e.target.value)}
-            maxLength={120}
+            placeholder="e.g. Aviva"
+            slotProps={{ htmlInput: { maxLength: 120 } }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="reference">Reference</Label>
-          <Input
-            id="reference"
-            name="reference"
-            placeholder="Policy / account no."
+          <TextField
+            label="Reference"
             value={reference}
             onChange={(e) => setReference(e.target.value)}
-            maxLength={120}
+            placeholder="Policy / account no."
+            slotProps={{ htmlInput: { maxLength: 120 } }}
           />
-        </div>
-      </div>
+        </Box>
 
-      <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
-        <Textarea
-          id="notes"
-          name="notes"
-          rows={2}
-          placeholder="Optional"
+        <TextField
+          label="Notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          multiline
+          minRows={2}
+          placeholder="Optional"
         />
-      </div>
 
-      <div className="flex items-center gap-2">
-        <Switch id="active" checked={active} onCheckedChange={setActive} />
-        <Label htmlFor="active" className="cursor-pointer">
-          Active
-        </Label>
-      </div>
-
-      <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : isEdit ? "Save changes" : "Create"}
-        </Button>
-      </DialogFooter>
-    </form>
+        <FormControlLabel
+          control={<Switch checked={active} onChange={(_, v) => setActive(v)} />}
+          label="Active"
+          sx={{ ml: 0, gap: 1.5 }}
+        />
+      </Stack>
+    </FormDialog>
   );
 }

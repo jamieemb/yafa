@@ -1,22 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
 import { format } from "date-fns";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+import Autocomplete from "@mui/material/Autocomplete";
+import Box from "@mui/material/Box";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import EditOutlined from "@mui/icons-material/EditOutlined";
+import { toast } from "@/components/toast";
+import { FormDialog } from "@/components/form-dialog";
+import { ResponsiveAction } from "@/components/responsive-action";
 import { createIncomeEntry, updateIncomeEntry } from "../actions";
 
 export interface IncomeInitial {
@@ -31,12 +28,14 @@ export interface IncomeInitial {
 }
 
 interface Props {
+  /** When set, the dialog edits this entry and the trigger is an edit icon. */
   initial?: IncomeInitial;
-  defaultMonthIso: string; // "YYYY-MM"
+  /** Month being viewed, "YYYY-MM" — the default budget month for new entries. */
+  defaultMonthIso: string;
   personOptions?: string[];
   accountOptions?: string[];
-  triggerLabel?: string;
-  triggerVariant?: "default" | "ghost" | "outline";
+  /** For the create trigger: render as a FAB on phones (default) or a plain button. */
+  fabOnMobile?: boolean;
 }
 
 export function IncomeDialog({
@@ -44,53 +43,32 @@ export function IncomeDialog({
   defaultMonthIso,
   personOptions = [],
   accountOptions = [],
-  triggerLabel,
-  triggerVariant = "default",
+  fabOnMobile = true,
 }: Props) {
   const [open, setOpen] = useState(false);
   const isEdit = Boolean(initial);
 
-  const triggerContent = isEdit ? (
-    triggerLabel ?? "Edit"
-  ) : (
-    <>
-      <Plus className="size-4" />
-      {triggerLabel ?? "Add income"}
-    </>
-  );
-
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant={triggerVariant} size={isEdit ? "sm" : "default"} />
-        }
-      >
-        {triggerContent}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>
-            {isEdit ? "Edit income entry" : "New income entry"}
-          </DialogTitle>
-          <DialogDescription>
-            Pay landing in the last week of a month usually funds the next
-            budget month — we&apos;ll suggest the right one based on the
-            date paid.
-          </DialogDescription>
-        </DialogHeader>
-        {open && (
-          <IncomeForm
-            initial={initial}
-            defaultMonthIso={defaultMonthIso}
-            personOptions={personOptions}
-            accountOptions={accountOptions}
-            isEdit={isEdit}
-            onDone={() => setOpen(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <>
+      {isEdit ? (
+        <Tooltip title={`Edit ${initial!.label}`}>
+          <IconButton size="small" aria-label={`Edit ${initial!.label}`} onClick={() => setOpen(true)}>
+            <EditOutlined fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <ResponsiveAction label="New income" onClick={() => setOpen(true)} fabOnMobile={fabOnMobile} />
+      )}
+      {open ? (
+        <IncomeForm
+          initial={initial}
+          defaultMonthIso={defaultMonthIso}
+          personOptions={personOptions}
+          accountOptions={accountOptions}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -125,28 +103,22 @@ function inferBudgetMonthIsoFromPaidDate(paidIso: string): string {
   return monthInputValue(date, "");
 }
 
+const MONTH_ISO = /^\d{4}-\d{2}$/;
+
 interface FormProps {
   initial?: IncomeInitial;
   defaultMonthIso: string;
   personOptions: string[];
   accountOptions: string[];
-  isEdit: boolean;
-  onDone: () => void;
+  onClose: () => void;
 }
 
-function IncomeForm({
-  initial,
-  defaultMonthIso,
-  personOptions,
-  accountOptions,
-  isEdit,
-  onDone,
-}: FormProps) {
+function IncomeForm({ initial, defaultMonthIso, personOptions, accountOptions, onClose }: FormProps) {
+  const isEdit = Boolean(initial);
+
   // For new entries, default paidDate to today and let it drive the
   // budget month. For edits, use whatever's stored.
-  const initialPaidIso = initial
-    ? dateInputValue(initial.paidDate)
-    : todayLocalIso();
+  const initialPaidIso = initial ? dateInputValue(initial.paidDate) : todayLocalIso();
   const initialMonthIso = initial
     ? monthInputValue(initial.month, defaultMonthIso)
     : initialPaidIso
@@ -161,12 +133,12 @@ function IncomeForm({
 
   const [person, setPerson] = useState(initial?.person ?? "");
   const [label, setLabel] = useState(initial?.label ?? "");
-  const [amount, setAmount] = useState(
-    initial?.amount !== undefined ? String(initial.amount) : "",
-  );
+  const [amount, setAmount] = useState(initial?.amount !== undefined ? String(initial.amount) : "");
   const [bankAccount, setBankAccount] = useState(initial?.bankAccount ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [pending, startTransition] = useTransition();
+
+  const valid = label.trim().length > 0 && Number(amount) > 0 && MONTH_ISO.test(month);
 
   function onPaidDateChange(next: string) {
     setPaidDate(next);
@@ -183,152 +155,149 @@ function IncomeForm({
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
-    formData.set("month", `${month}-01T00:00:00Z`);
-    formData.set("paidDate", paidDate ? `${paidDate}T00:00:00Z` : "");
+    if (!valid) return;
+    const fd = new FormData();
+    fd.set("month", `${month}-01T00:00:00Z`);
+    fd.set("paidDate", paidDate ? `${paidDate}T00:00:00Z` : "");
+    fd.set("amount", amount);
+    fd.set("person", person.trim());
+    fd.set("label", label.trim());
+    fd.set("bankAccount", bankAccount.trim());
+    fd.set("notes", notes.trim());
 
     startTransition(async () => {
       try {
         if (initial) {
-          await updateIncomeEntry(initial.id, formData);
-          toast.success("Updated");
+          await updateIncomeEntry(initial.id, fd);
+          toast.success("Updated", label.trim());
         } else {
-          await createIncomeEntry(formData);
-          toast.success("Added");
+          await createIncomeEntry(fd);
+          toast.success("Added", label.trim());
         }
-        onDone();
+        onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+        toast.error("Could not save", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
-  // Friendly preview line for the user
+  // Friendly preview line: which budget month this pay will count towards.
   let preview = "";
-  if (paidDate && month) {
+  if (paidDate && MONTH_ISO.test(month)) {
     const [y, m] = month.split("-").map(Number);
-    const monthLabel = format(new Date(y!, (m ?? 1) - 1, 1), "MMMM yyyy");
-    const paidLabel = format(new Date(paidDate), "d MMM");
-    preview = `Paid ${paidLabel} → applied to ${monthLabel} budget`;
+    const [py, pm, pd] = paidDate.split("-").map(Number);
+    if (y && m && py && pm && pd) {
+      const monthLabel = format(new Date(y, m - 1, 1), "MMMM yyyy");
+      const paidLabel = format(new Date(py, pm - 1, pd), "d MMM");
+      preview = `Paid ${paidLabel} → applied to ${monthLabel} budget`;
+    }
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="paidDate">Paid on</Label>
-          <Input
-            id="paidDate"
+    <FormDialog
+      open
+      onClose={onClose}
+      title={isEdit ? "Edit income entry" : "New income entry"}
+      description="Pay landing in the last week of a month usually funds the next budget month — we'll suggest the right one based on the date paid."
+      onSubmit={onSubmit}
+      submitLabel={isEdit ? "Save" : "Add"}
+      pending={pending}
+      submitDisabled={!valid}
+    >
+      <Stack spacing={2.5}>
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField
+            label="Paid on"
             type="date"
             value={paidDate}
             onChange={(e) => onPaidDateChange(e.target.value)}
+            slotProps={{ inputLabel: { shrink: true } }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="month">Budget month</Label>
-          <Input
-            id="month"
+          <TextField
+            label="Budget month"
             type="month"
             value={month}
             onChange={(e) => onMonthChange(e.target.value)}
             required
+            slotProps={{ inputLabel: { shrink: true } }}
           />
-        </div>
-      </div>
+        </Box>
 
-      {preview ? (
-        <p className="text-[11px] text-muted-foreground -mt-2">{preview}</p>
-      ) : null}
+        {preview ? (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: -1.5 }}>
+            {preview}
+          </Typography>
+        ) : null}
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="amount">Amount (£)</Label>
-          <Input
-            id="amount"
-            name="amount"
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+          <TextField
+            label="Amount"
             type="number"
-            step="0.01"
-            min="0.01"
+            inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             required
+            autoFocus={!isEdit}
+            slotProps={{
+              input: { startAdornment: <InputAdornment position="start">£</InputAdornment> },
+              htmlInput: { min: 0.01, step: 0.01 },
+            }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="person">Person</Label>
-          <Input
-            id="person"
-            name="person"
-            list="income-person-options"
-            placeholder="e.g. Jamie"
-            value={person}
-            onChange={(e) => setPerson(e.target.value)}
-            maxLength={60}
+          <Autocomplete
+            freeSolo
+            options={personOptions}
+            inputValue={person}
+            onInputChange={(_, v) => setPerson(v)}
+            renderInput={(params) => (
+              <TextField
+                {...params}
+                label="Person"
+                placeholder="e.g. Jamie"
+                slotProps={{
+                  ...params.slotProps,
+                  htmlInput: { ...params.slotProps.htmlInput, maxLength: 60 },
+                }}
+              />
+            )}
           />
-          <datalist id="income-person-options">
-            {personOptions.map((p) => (
-              <option key={p} value={p} />
-            ))}
-          </datalist>
-        </div>
-      </div>
+        </Box>
 
-      <div className="space-y-2">
-        <Label htmlFor="label">Label</Label>
-        <Input
-          id="label"
-          name="label"
-          placeholder="e.g. Salary, On-call"
+        <TextField
+          label="Label"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           required
-          maxLength={120}
+          placeholder="e.g. Salary, On-call"
+          slotProps={{ htmlInput: { maxLength: 120 } }}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="bankAccount">Lands in</Label>
-        <Input
-          id="bankAccount"
-          name="bankAccount"
-          list="income-account-options"
-          placeholder="e.g. Monzo Joint"
-          value={bankAccount}
-          onChange={(e) => setBankAccount(e.target.value)}
-          maxLength={60}
+        <Autocomplete
+          freeSolo
+          options={accountOptions}
+          inputValue={bankAccount}
+          onInputChange={(_, v) => setBankAccount(v)}
+          renderInput={(params) => (
+            <TextField
+              {...params}
+              label="Lands in"
+              placeholder="e.g. Monzo Joint"
+              slotProps={{
+                ...params.slotProps,
+                htmlInput: { ...params.slotProps.htmlInput, maxLength: 60 },
+              }}
+            />
+          )}
         />
-        <datalist id="income-account-options">
-          {accountOptions.map((a) => (
-            <option key={a} value={a} />
-          ))}
-        </datalist>
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
-        <Textarea
-          id="notes"
-          name="notes"
-          rows={2}
-          placeholder="Optional"
+        <TextField
+          label="Notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          multiline
+          minRows={2}
+          placeholder="Optional"
         />
-      </div>
-
-      <DialogFooter>
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={onDone}
-          disabled={pending}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : isEdit ? "Save" : "Add"}
-        </Button>
-      </DialogFooter>
-    </form>
+      </Stack>
+    </FormDialog>
   );
 }

@@ -1,29 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { format } from "date-fns";
-import { Receipt, ArrowLeft, Check, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Switch } from "@/components/ui/switch";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import Box from "@mui/material/Box";
+import Button from "@mui/material/Button";
+import Checkbox from "@mui/material/Checkbox";
+import Chip from "@mui/material/Chip";
+import Drawer from "@mui/material/Drawer";
+import IconButton from "@mui/material/IconButton";
+import InputAdornment from "@mui/material/InputAdornment";
+import MenuItem from "@mui/material/MenuItem";
+import Stack from "@mui/material/Stack";
+import SwipeableDrawer from "@mui/material/SwipeableDrawer";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import Typography from "@mui/material/Typography";
+import useMediaQuery from "@mui/material/useMediaQuery";
+import { useTheme } from "@mui/material/styles";
+import ArrowBackRounded from "@mui/icons-material/ArrowBackRounded";
+import CheckCircleRounded from "@mui/icons-material/CheckCircleRounded";
+import CloseRounded from "@mui/icons-material/CloseRounded";
+import InfoOutlined from "@mui/icons-material/InfoOutlined";
+import ReceiptLongOutlined from "@mui/icons-material/ReceiptLongOutlined";
+import { toast } from "@/components/toast";
+import { ResponsiveAction } from "@/components/responsive-action";
 import {
   STATEMENT_SOURCES,
   STATEMENT_SOURCE_LABELS,
@@ -49,32 +49,144 @@ function todayIso(): string {
   return `${y}-${m}-${day}`;
 }
 
-export function CycleSheet() {
+interface Props {
+  /** Render the trigger as a FAB on phones (default) or a plain button. */
+  fabOnMobile?: boolean;
+}
+
+/**
+ * "Settle a payment" — reconcile a real-world card payment against the
+ * uncycled transactions it covered (subset-sum). Opens a bottom sheet
+ * on phones and a side panel on desktop. The flow itself is mounted
+ * only while the panel is open so each run starts fresh.
+ */
+export function CycleSheet({ fabOnMobile = true }: Props) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  function show() {
+    setMounted(true);
+    setOpen(true);
+  }
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger
-        render={
-          <Button variant="outline">
-            <Receipt className="size-4" />
-            Settle a payment
-          </Button>
-        }
+    <>
+      <ResponsiveAction
+        label="Settle a payment"
+        icon={<ReceiptLongOutlined />}
+        variant="tonal"
+        fabOnMobile={fabOnMobile}
+        onClick={show}
       />
-      <SheetContent className="sm:max-w-xl flex flex-col gap-0 p-0">
-        <SheetHeader className="px-5 py-4 border-b">
-          <SheetTitle>Settle a card payment</SheetTitle>
-          <SheetDescription>
-            Enter how much you paid and we&apos;ll work out which transactions
-            it covers.
-          </SheetDescription>
-        </SheetHeader>
-        {open && <CycleFlow onDone={() => setOpen(false)} />}
-      </SheetContent>
-    </Sheet>
+      <CyclePanel open={open} onClose={() => setOpen(false)} onExited={() => setMounted(false)}>
+        {mounted ? <CycleFlow onDone={() => setOpen(false)} /> : null}
+      </CyclePanel>
+    </>
   );
 }
+
+// ── Panel chrome ────────────────────────────────────────────────────
+
+interface PanelProps {
+  open: boolean;
+  onClose: () => void;
+  onExited: () => void;
+  children: ReactNode;
+}
+
+function CyclePanel({ open, onClose, onExited, children }: PanelProps) {
+  const theme = useTheme();
+  const phone = useMediaQuery(theme.breakpoints.down("md"));
+
+  const header = (
+    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1, px: 3, pt: 2, pb: 1.5, flexShrink: 0 }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="h5" component="h2">
+          Settle a card payment
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Enter how much you paid and we&apos;ll work out which transactions it covers.
+        </Typography>
+      </Box>
+      <Tooltip title="Close">
+        <IconButton edge="end" aria-label="Close" onClick={onClose}>
+          <CloseRounded />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
+
+  if (phone) {
+    return (
+      <SwipeableDrawer
+        anchor="bottom"
+        open={open}
+        onClose={onClose}
+        onOpen={() => {}}
+        disableSwipeToOpen
+        onTransitionExited={onExited}
+        slotProps={{
+          paper: { sx: { maxHeight: "85dvh", display: "flex", flexDirection: "column" } },
+        }}
+      >
+        <Box
+          aria-hidden
+          sx={{
+            width: 32,
+            height: 4,
+            borderRadius: 2,
+            bgcolor: "m3.outline",
+            opacity: 0.6,
+            mx: "auto",
+            mt: 1.5,
+            mb: 0.5,
+            flexShrink: 0,
+          }}
+        />
+        {header}
+        {children}
+      </SwipeableDrawer>
+    );
+  }
+
+  return (
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      onTransitionExited={onExited}
+      slotProps={{
+        paper: { sx: { width: 420, maxWidth: "100vw", display: "flex", flexDirection: "column" } },
+      }}
+    >
+      {header}
+      {children}
+    </Drawer>
+  );
+}
+
+function PanelFooter({ children, between = false }: { children: ReactNode; between?: boolean }) {
+  return (
+    <Box
+      sx={{
+        display: "flex",
+        justifyContent: between ? "space-between" : "flex-end",
+        alignItems: "center",
+        gap: 1,
+        px: 3,
+        pt: 2,
+        pb: "calc(16px + env(safe-area-inset-bottom))",
+        borderTop: "1px solid",
+        borderColor: "divider",
+        flexShrink: 0,
+      }}
+    >
+      {children}
+    </Box>
+  );
+}
+
+// ── Flow ────────────────────────────────────────────────────────────
 
 function CycleFlow({ onDone }: { onDone: () => void }) {
   const [stats, setStats] = useState<SourceCycleStats[] | null>(null);
@@ -96,9 +208,7 @@ function CycleFlow({ onDone }: { onDone: () => void }) {
       .then((s) => {
         if (cancelled) return;
         setStats(s);
-        const best = [...s].sort(
-          (a, b) => b.uncycledCount - a.uncycledCount,
-        )[0];
+        const best = [...s].sort((a, b) => b.uncycledCount - a.uncycledCount)[0];
         if (best && best.uncycledCount > 0) setSource(best.source);
       })
       .catch(() => {});
@@ -122,15 +232,17 @@ function CycleFlow({ onDone }: { onDone: () => void }) {
         setStage("review");
         if (res.candidates.length === 0) {
           toast.info(
+            "Nothing to settle",
             `No uncycled transactions for ${STATEMENT_SOURCE_LABELS[source]} — import a statement first.`,
           );
         } else if (!res.exactMatch) {
           toast.warning(
-            `No exact subset matches £${amount.toFixed(2)}. Adjust manually.`,
+            "No exact match",
+            `Nothing sums to ${formatGBP(amount)} — adjust the selection manually.`,
           );
         }
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed");
+        toast.error("Could not find matches", err instanceof Error ? err.message : undefined);
       }
     });
   }
@@ -155,10 +267,13 @@ function CycleFlow({ onDone }: { onDone: () => void }) {
           transactionIds: Array.from(selected),
           notes: notes.trim() || undefined,
         });
-        toast.success(`Settled ${selected.size} transactions`);
+        toast.success(
+          `Settled ${selected.size} transaction${selected.size === 1 ? "" : "s"}`,
+          `${STATEMENT_SOURCE_LABELS[source]} · ${formatGBP(amount)}`,
+        );
         onDone();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed");
+        toast.error("Could not settle", err instanceof Error ? err.message : undefined);
       }
     });
   }
@@ -196,6 +311,8 @@ function CycleFlow({ onDone }: { onDone: () => void }) {
   );
 }
 
+// ── Stage 1: what did you pay? ──────────────────────────────────────
+
 interface InputStageProps {
   stats: SourceCycleStats[] | null;
   source: StatementSource;
@@ -214,104 +331,98 @@ interface InputStageProps {
 function CycleInputStage(p: InputStageProps) {
   const sourceStats = p.stats?.find((s) => s.source === p.source);
 
-  return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="cycle-source">Card</Label>
-          <Select
-            value={p.source}
-            onValueChange={(v) =>
-              p.setSource((v ?? "NATWEST") as StatementSource)
-            }
-          >
-            <SelectTrigger id="cycle-source" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {STATEMENT_SOURCES.map((s) => {
-                const stat = p.stats?.find((x) => x.source === s);
-                return (
-                  <SelectItem key={s} value={s}>
-                    <div className="flex items-baseline justify-between gap-3 w-full">
-                      <span>{STATEMENT_SOURCE_LABELS[s]}</span>
-                      {stat ? (
-                        <span className="text-[11px] text-muted-foreground tabular-nums">
-                          {stat.uncycledCount === 0
-                            ? "no candidates"
-                            : `${stat.uncycledCount} · £${stat.uncycledTotal.toFixed(2)}`}
-                        </span>
-                      ) : null}
-                    </div>
-                  </SelectItem>
-                );
-              })}
-            </SelectContent>
-          </Select>
-          {sourceStats && sourceStats.uncycledCount > 0 ? (
-            <p className="text-[11px] text-muted-foreground">
-              {sourceStats.uncycledCount} uncycled transaction
-              {sourceStats.uncycledCount === 1 ? "" : "s"} · total balance{" "}
-              <span className="font-mono tabular-nums">
-                £{sourceStats.uncycledTotal.toFixed(2)}
-              </span>
-            </p>
-          ) : sourceStats ? (
-            <p className="text-[11px] text-muted-foreground">
-              Nothing to settle on {STATEMENT_SOURCE_LABELS[p.source]} — import
-              a statement first.
-            </p>
-          ) : null}
-        </div>
+  let helper: string | undefined;
+  if (sourceStats && sourceStats.uncycledCount > 0) {
+    helper = `${sourceStats.uncycledCount} uncycled transaction${
+      sourceStats.uncycledCount === 1 ? "" : "s"
+    } · total balance ${formatGBP(sourceStats.uncycledTotal)}`;
+  } else if (sourceStats) {
+    helper = `Nothing to settle on ${STATEMENT_SOURCE_LABELS[p.source]} — import a statement first.`;
+  }
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="cycle-amount">Amount paid (£)</Label>
-            <Input
-              id="cycle-amount"
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto", px: 3, py: 2 }}>
+        <Stack spacing={2.5}>
+          <TextField
+            select
+            label="Card"
+            value={p.source}
+            onChange={(e) => p.setSource(e.target.value as StatementSource)}
+            helperText={helper}
+            slotProps={{
+              select: {
+                // Keep the closed field to just the name; the per-card
+                // stats only show in the open menu.
+                renderValue: (v) => STATEMENT_SOURCE_LABELS[v as StatementSource],
+              },
+            }}
+          >
+            {STATEMENT_SOURCES.map((s) => {
+              const stat = p.stats?.find((x) => x.source === s);
+              return (
+                <MenuItem key={s} value={s} sx={{ justifyContent: "space-between", gap: 2 }}>
+                  <span>{STATEMENT_SOURCE_LABELS[s]}</span>
+                  {stat ? (
+                    <Typography variant="caption" color="text.secondary" className="tabular">
+                      {stat.uncycledCount === 0
+                        ? "no candidates"
+                        : `${stat.uncycledCount} · ${formatGBP(stat.uncycledTotal)}`}
+                    </Typography>
+                  ) : null}
+                </MenuItem>
+              );
+            })}
+          </TextField>
+
+          <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
+            <TextField
+              label="Amount paid"
               type="number"
-              step="0.01"
-              min="0.01"
+              inputMode="decimal"
               value={p.paidAmount}
               onChange={(e) => p.setPaidAmount(e.target.value)}
               placeholder="237.55"
               autoFocus
+              required
+              slotProps={{
+                input: { startAdornment: <InputAdornment position="start">£</InputAdornment> },
+                htmlInput: { min: 0.01, step: 0.01 },
+              }}
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="cycle-date">Paid on</Label>
-            <Input
-              id="cycle-date"
+            <TextField
+              label="Paid on"
               type="date"
               value={p.paidDate}
               onChange={(e) => p.setPaidDate(e.target.value)}
+              slotProps={{ inputLabel: { shrink: true } }}
             />
-          </div>
-        </div>
+          </Box>
 
-        <div className="space-y-2">
-          <Label htmlFor="cycle-notes">Notes</Label>
-          <Textarea
-            id="cycle-notes"
-            rows={2}
-            placeholder="Optional"
+          <TextField
+            label="Notes"
             value={p.notes}
             onChange={(e) => p.setNotes(e.target.value)}
+            multiline
+            minRows={2}
+            placeholder="Optional"
           />
-        </div>
-      </div>
+        </Stack>
+      </Box>
 
-      <div className="flex justify-end gap-2 px-5 py-3 border-t bg-muted/40">
-        <Button variant="ghost" onClick={p.onCancel} disabled={p.pending}>
+      <PanelFooter>
+        <Button onClick={p.onCancel} disabled={p.pending}>
           Cancel
         </Button>
-        <Button onClick={p.onFind} disabled={p.pending || !p.paidAmount}>
+        <Button variant="contained" onClick={p.onFind} disabled={p.pending || !p.paidAmount}>
           {p.pending ? "Finding…" : "Find matching transactions"}
         </Button>
-      </div>
-    </div>
+      </PanelFooter>
+    </Box>
   );
 }
+
+// ── Stage 2: review the match ───────────────────────────────────────
 
 interface ReviewStageProps {
   candidates: CycleCandidate[];
@@ -335,113 +446,189 @@ function CycleReviewStage(p: ReviewStageProps) {
     return s;
   }, [p.candidates, p.selected]);
 
+  // Per-category split of the selected rows, largest first.
+  const breakdown = useMemo(() => {
+    const byCat = new Map<string, number>();
+    for (const c of p.candidates) {
+      if (!p.selected.has(c.id)) continue;
+      const key = c.spendCategory ?? "Uncategorised";
+      byCat.set(key, (byCat.get(key) ?? 0) + balanceImpactPence(c.amount));
+    }
+    return Array.from(byCat.entries())
+      .map(([label, pence]) => ({ label, pence }))
+      .sort((a, b) => b.pence - a.pence);
+  }, [p.candidates, p.selected]);
+
   const targetPence = poundsToPence(p.paidAmount);
   const diffPence = targetPence - selectedSumPence;
   const matches = diffPence === 0 && p.selected.size > 0;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* Running total banner — fixed at top of body */}
-      <div
-        className={`px-5 py-3 border-b ${
-          matches ? "bg-positive/10" : "bg-muted/40"
-        }`}
+    <Box sx={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      {/* Running total banner — pinned above the scrolling list */}
+      <Box
+        sx={{
+          px: 3,
+          py: 2,
+          flexShrink: 0,
+          bgcolor: matches ? "m3.primaryContainer" : "m3.surfaceContainer",
+          color: matches ? "m3.onPrimaryContainer" : "text.primary",
+          transition: "background-color 200ms",
+        }}
       >
-        <div className="flex items-baseline justify-between gap-3">
-          <div>
-            <p className="label-eyebrow">
+        <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2 }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="overline" component="p" sx={{ opacity: 0.8 }}>
               {matches ? "Match" : selectedSumPence === 0 ? "Pick rows" : "Adjust"}
-            </p>
-            <p className="font-mono text-xl tabular-nums tracking-tight mt-1">
-              {formatGBP(selectedSumPence / 100)}{" "}
-              <span className="text-muted-foreground text-[12px]">
+            </Typography>
+            <Typography variant="h4" component="p" className="tabular">
+              {formatGBP(selectedSumPence / 100)}
+              <Typography component="span" variant="body2" sx={{ ml: 0.75, opacity: 0.8 }}>
                 / {formatGBP(p.paidAmount)}
-              </span>
-            </p>
-          </div>
+              </Typography>
+            </Typography>
+          </Box>
           {matches ? (
-            <Check className="size-5 text-positive" />
+            <CheckCircleRounded sx={{ color: "success.main", fontSize: 28 }} />
           ) : diffPence > 0 ? (
-            <span className="text-[12px] text-muted-foreground tabular-nums">
+            <Typography variant="body2" color="text.secondary" className="tabular" sx={{ whiteSpace: "nowrap" }}>
               −{formatGBP(diffPence / 100)} short
-            </span>
+            </Typography>
           ) : (
-            <span className="text-[12px] text-negative tabular-nums">
+            <Typography variant="body2" className="tabular" sx={{ color: "error.main", whiteSpace: "nowrap" }}>
               +{formatGBP(Math.abs(diffPence) / 100)} over
-            </span>
+            </Typography>
           )}
-        </div>
+        </Box>
+
         {!p.exactMatch && p.candidates.length > 0 ? (
-          <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1.5">
-            <AlertCircle className="size-3" />
+          <Typography
+            variant="caption"
+            component="p"
+            sx={{ mt: 1, display: "flex", alignItems: "center", gap: 0.75, opacity: 0.85 }}
+          >
+            <InfoOutlined sx={{ fontSize: 16 }} />
             No exact match auto-found. Tick rows manually.
-          </p>
+          </Typography>
         ) : null}
-      </div>
 
-      {/* Candidates list — scrolls */}
-      <div className="flex-1 overflow-y-auto">
+        {breakdown.length > 0 ? (
+          <Box component="dl" sx={{ m: 0, mt: 1.5, display: "grid", gap: 0.25 }}>
+            {breakdown.map((b) => (
+              <Box key={b.label} sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                <Typography component="dt" variant="caption" noWrap sx={{ opacity: 0.85 }}>
+                  {b.label}
+                </Typography>
+                <Typography component="dd" variant="caption" className="tabular" sx={{ m: 0 }}>
+                  {formatGBP(b.pence / 100)}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+        ) : null}
+      </Box>
+
+      {/* Candidates — scrolls */}
+      <Box sx={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {p.candidates.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-8 text-center">
+          <Typography variant="body2" color="text.secondary" sx={{ py: 6, px: 3, textAlign: "center" }}>
             No uncycled transactions for this source.
-          </p>
+          </Typography>
         ) : (
-          <ul className="divide-y">
-            {p.candidates.map((c) => {
-              const isSelected = p.selected.has(c.id);
-              const isRefund = c.amount > 0;
-              return (
-                <li
-                  key={c.id}
-                  className="flex items-center gap-3 px-5 py-2.5"
-                >
-                  <Switch
-                    size="sm"
-                    checked={isSelected}
-                    onCheckedChange={() => p.onToggle(c.id)}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] truncate">
-                      {c.description}
-                      {isRefund ? (
-                        <span className="ml-1.5 inline-block rounded-sm bg-positive/15 text-positive text-[9px] uppercase tracking-wider font-medium px-1 py-0.5 align-middle">
-                          Refund
-                        </span>
-                      ) : null}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground tabular-nums mt-0.5">
-                      {format(c.date, "d MMM yyyy")}
-                      {c.spendCategory ? ` · ${c.spendCategory}` : ""}
-                    </p>
-                  </div>
-                  <p
-                    className={`font-mono tabular-nums text-[13px] w-20 text-right shrink-0 ${
-                      isRefund ? "text-positive" : "text-negative"
-                    }`}
-                  >
-                    {formatGBP(c.amount)}
-                  </p>
-                </li>
-              );
-            })}
-          </ul>
+          <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0 }}>
+            {p.candidates.map((c) => (
+              <CandidateRow
+                key={c.id}
+                candidate={c}
+                selected={p.selected.has(c.id)}
+                disabled={p.pending}
+                onToggle={() => p.onToggle(c.id)}
+              />
+            ))}
+          </Box>
         )}
-      </div>
+      </Box>
 
-      {/* Footer */}
-      <div className="flex justify-between gap-2 px-5 py-3 border-t bg-muted/40">
-        <Button variant="ghost" onClick={p.onBack} disabled={p.pending}>
-          <ArrowLeft className="size-4" />
+      <PanelFooter between>
+        <Button startIcon={<ArrowBackRounded />} onClick={p.onBack} disabled={p.pending}>
           Back
         </Button>
-        <Button onClick={p.onConfirm} disabled={p.pending || !matches}>
+        <Button variant="contained" onClick={p.onConfirm} disabled={p.pending || !matches}>
           {p.pending
             ? "Settling…"
             : matches
               ? `Settle ${p.selected.size} transaction${p.selected.size === 1 ? "" : "s"}`
               : "Match required"}
         </Button>
-      </div>
-    </div>
+      </PanelFooter>
+    </Box>
+  );
+}
+
+interface CandidateRowProps {
+  candidate: CycleCandidate;
+  selected: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+}
+
+function CandidateRow({ candidate: c, selected, disabled, onToggle }: CandidateRowProps) {
+  const isRefund = c.amount > 0;
+  return (
+    <Box
+      component="li"
+      sx={{ borderTop: "1px solid", borderColor: "divider", "&:first-of-type": { borderTop: 0 } }}
+    >
+      {/* The whole row is the checkbox's label so it's one big tap target. */}
+      <Box
+        component="label"
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          pl: 1.5,
+          pr: 3,
+          py: 0.5,
+          cursor: disabled ? "default" : "pointer",
+          "&:hover": { bgcolor: "action.hover" },
+        }}
+      >
+        <Checkbox
+          checked={selected}
+          disabled={disabled}
+          onChange={onToggle}
+          slotProps={{ input: { "aria-label": `Include ${c.description}` } }}
+        />
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography variant="body2" component="div" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Box
+              component="span"
+              sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            >
+              {c.description}
+            </Box>
+            {isRefund ? (
+              <Chip
+                size="small"
+                variant="outlined"
+                label="Refund"
+                sx={{ height: 20, flexShrink: 0, color: "success.main", borderColor: "success.main" }}
+              />
+            ) : null}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" component="div" className="tabular">
+            {format(c.date, "d MMM yyyy")}
+            {c.spendCategory ? ` · ${c.spendCategory}` : ""}
+          </Typography>
+        </Box>
+        <Typography
+          variant="body2"
+          className="tabular"
+          sx={{ flexShrink: 0, fontWeight: 500, color: isRefund ? "success.main" : "error.main" }}
+        >
+          {formatGBP(c.amount)}
+        </Typography>
+      </Box>
+    </Box>
   );
 }

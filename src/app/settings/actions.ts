@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
+import { isTheme } from "@/lib/themes";
 import { settingsSchema } from "@/lib/validation";
 
 export async function updateSettings(formData: FormData): Promise<void> {
@@ -32,6 +33,17 @@ export async function updateSettings(formData: FormData): Promise<void> {
   });
 
   // Theme lives in layout.tsx so it touches every page; revalidate
-  // root to ensure the new class is applied immediately.
+  // root to ensure the new attribute is applied immediately.
+  revalidatePath("/", "layout");
+}
+
+/** Persist just the light / dark / system preference (header toggle). */
+export async function updateTheme(theme: string): Promise<void> {
+  if (!isTheme(theme)) throw new Error(`Unknown theme: ${theme}`);
+  await prisma.settings.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton", theme },
+    update: { theme },
+  });
   revalidatePath("/", "layout");
 }

@@ -1,4 +1,14 @@
 import { format } from "date-fns";
+import Accordion from "@mui/material/Accordion";
+import AccordionDetails from "@mui/material/AccordionDetails";
+import AccordionSummary from "@mui/material/AccordionSummary";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import CreditCardOutlined from "@mui/icons-material/CreditCardOutlined";
+import ExpandMoreRounded from "@mui/icons-material/ExpandMoreRounded";
 import { prisma } from "@/lib/db";
 import {
   STATEMENT_SOURCE_LABELS,
@@ -7,31 +17,20 @@ import {
   type SpendCategory,
 } from "@/lib/categories";
 import { formatGBP } from "@/lib/money";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Kpi } from "@/components/kpi";
-import { DeleteCycleButton } from "./_components/delete-cycle-button";
+import { categoryColor } from "@/lib/pot-colors";
+import { PageHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
+import { deletePayCycle } from "@/app/transactions/cycle-actions";
 
 export const dynamic = "force-dynamic";
 
-const PALETTE = [
-  "#003A6C",
-  "#FD8973",
-  "#4F7E5C",
-  "#B8956A",
-  "#6B7E8C",
-  "#2E5783",
-  "#E0A993",
-  "#84A48F",
-];
-
 const UNCATEGORISED = "Uncategorised";
+
+type Cycle = Awaited<ReturnType<typeof loadCycles>>[number];
+type CycleTransaction = Cycle["transactions"][number];
 
 interface BreakdownRow {
   category: string;
@@ -39,8 +38,8 @@ interface BreakdownRow {
   total: number; // £, balance impact (positive = money owed for this category)
 }
 
-export default async function CyclesPage() {
-  const cycles = await prisma.payCycle.findMany({
+function loadCycles() {
+  return prisma.payCycle.findMany({
     orderBy: [{ paidDate: "desc" }, { createdAt: "desc" }],
     include: {
       transactions: {
@@ -48,113 +47,190 @@ export default async function CyclesPage() {
       },
     },
   });
+}
 
+export default async function CyclesPage() {
+  const cycles = await loadCycles();
   const totalSettled = cycles.reduce((acc, c) => acc + c.paidAmount, 0);
+  const cycleCount = `${cycles.length} cycle${cycles.length === 1 ? "" : "s"}`;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Books</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Pay cycles
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Each cycle records a card payment. The breakdown shows which pots
-            to pay from.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 min-w-[280px]">
-          <Kpi label="Cycles" value={String(cycles.length)} />
-          <Kpi label="Total settled" value={formatGBP(totalSettled)} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Books"
+        title="Pay cycles"
+        description="Each cycle records a card payment. The breakdown shows which pots to pay from."
+      />
+
+      <KpiGrid columns={2}>
+        <Kpi label="Total settled" value={formatGBP(totalSettled)} sub={cycleCount} emphasised size="lg" />
+        <Kpi label="Cycles" value={String(cycles.length)} sub="Card payments recorded" />
+      </KpiGrid>
 
       {cycles.length === 0 ? (
-        <div className="rounded-md border border-dashed p-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            No cycles yet. Use &ldquo;Settle a payment&rdquo; on the Transactions
-            page to create one.
-          </p>
-        </div>
+        <EmptyState
+          icon={<CreditCardOutlined fontSize="inherit" />}
+          title="No cycles yet"
+          description="Use “Settle a payment” on the Transactions page to record a card payment and create one."
+        />
       ) : (
-        <ul className="space-y-6">
-          {cycles.map((cycle) => {
-            const breakdown = computeBreakdown(cycle.transactions);
-            return (
-              <li
-                key={cycle.id}
-                className="rounded-md border bg-card overflow-hidden"
-              >
-                <div className="flex items-baseline justify-between gap-3 px-5 py-3.5 border-b">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {STATEMENT_SOURCE_LABELS[cycle.source as StatementSource] ??
-                        cycle.source}
-                    </span>
-                    <span className="label-eyebrow">
-                      {cycle.transactions.length} transaction
-                      {cycle.transactions.length === 1 ? "" : "s"}
-                    </span>
-                    <span className="label-eyebrow">
-                      Paid {format(cycle.paidDate, "d MMM yyyy")}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono tabular-nums text-base">
-                      {formatGBP(cycle.paidAmount)}
-                    </span>
-                    <DeleteCycleButton
-                      id={cycle.id}
-                      label={`${STATEMENT_SOURCE_LABELS[cycle.source as StatementSource] ?? cycle.source} · ${format(cycle.paidDate, "d MMM yyyy")}`}
-                      count={cycle.transactions.length}
-                    />
-                  </div>
-                </div>
-                {cycle.notes ? (
-                  <p className="px-5 py-2 text-[12px] text-muted-foreground border-b">
-                    {cycle.notes}
-                  </p>
-                ) : null}
-                <Breakdown rows={breakdown} cyclePaid={cycle.paidAmount} />
-                <Table>
-                  <TableHeader>
-                    <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                      <TableHead className="h-9">Date</TableHead>
-                      <TableHead className="h-9">Description</TableHead>
-                      <TableHead className="h-9">Category</TableHead>
-                      <TableHead className="h-9 text-right">Amount</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {cycle.transactions.map((tx) => (
-                      <TableRow key={tx.id}>
-                        <TableCell className="text-[12px] text-muted-foreground tabular-nums whitespace-nowrap">
-                          {format(tx.date, "d MMM yy")}
-                        </TableCell>
-                        <TableCell className="text-[13px] truncate max-w-md">
-                          {tx.description}
-                        </TableCell>
-                        <TableCell className="text-[11px] text-muted-foreground">
-                          {tx.spendCategory ?? "—"}
-                        </TableCell>
-                        <TableCell
-                          className={`text-right tabular-nums font-mono text-[13px] ${
-                            tx.amount < 0 ? "text-negative" : "text-positive"
-                          }`}
-                        >
-                          {formatGBP(tx.amount)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </li>
-            );
-          })}
-        </ul>
+        <Stack spacing={2}>
+          {cycles.map((cycle) => (
+            <CycleCard key={cycle.id} cycle={cycle} />
+          ))}
+        </Stack>
       )}
-    </div>
+    </>
+  );
+}
+
+function CycleCard({ cycle }: { cycle: Cycle }) {
+  const sourceLabel = STATEMENT_SOURCE_LABELS[cycle.source as StatementSource] ?? cycle.source;
+  const paidLabel = format(cycle.paidDate, "d MMM yyyy");
+  const count = cycle.transactions.length;
+  const countLabel = `${count} transaction${count === 1 ? "" : "s"}`;
+  const breakdown = computeBreakdown(cycle.transactions);
+  const headingId = `cycle-${cycle.id}`;
+
+  return (
+    <Card component="section" aria-labelledby={headingId}>
+      {/* Header: source, paid date, amount, un-settle */}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 2,
+          px: 2,
+          py: 1.5,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0, flexWrap: "wrap" }}>
+          <Chip size="small" label={sourceLabel} />
+          <Typography id={headingId} variant="h5" component="h2" noWrap>
+            Paid {paidLabel}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
+            {countLabel}
+          </Typography>
+        </Box>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5, flexShrink: 0 }}>
+          <Typography variant="h5" component="p" className="tabular" sx={{ whiteSpace: "nowrap" }}>
+            {formatGBP(cycle.paidAmount)}
+          </Typography>
+          <ConfirmDeleteButton
+            label={`Un-settle cycle ${sourceLabel} · ${paidLabel}`}
+            heading="Un-settle this cycle?"
+            description={`The ${countLabel} in this cycle will go back to uncycled and become available for the next settlement.`}
+            onConfirm={deletePayCycle.bind(null, cycle.id)}
+            successMessage={`Cycle un-settled · ${countLabel} freed`}
+            confirmText="Un-settle"
+          />
+        </Box>
+      </Box>
+
+      {cycle.notes ? (
+        <Typography
+          variant="body2"
+          color="text.secondary"
+          sx={{ px: 2, py: 1, borderBottom: "1px solid", borderColor: "divider" }}
+        >
+          {cycle.notes}
+        </Typography>
+      ) : null}
+
+      <Breakdown rows={breakdown} cyclePaid={cycle.paidAmount} />
+
+      {/* Transactions in this cycle */}
+      <Accordion
+        disableGutters
+        square
+        elevation={0}
+        sx={{
+          bgcolor: "transparent",
+          "&::before": { display: "none" },
+          borderTop: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <AccordionSummary
+          expandIcon={<ExpandMoreRounded />}
+          aria-controls={`${headingId}-transactions`}
+          id={`${headingId}-transactions-summary`}
+          sx={{ px: 2, minHeight: 48 }}
+        >
+          <Typography variant="subtitle2" component="span">
+            {countLabel}
+          </Typography>
+        </AccordionSummary>
+        <AccordionDetails id={`${headingId}-transactions`} sx={{ p: 0 }}>
+          <DataList<CycleTransaction>
+            rows={cycle.transactions}
+            getKey={(t) => t.id}
+            size="small"
+            columns={[
+              {
+                id: "date",
+                header: "Date",
+                nowrap: true,
+                numeric: true,
+                render: (t) => format(t.date, "d MMM yy"),
+              },
+              {
+                id: "description",
+                header: "Description",
+                render: (t) => (
+                  <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>
+                    {t.description}
+                  </Typography>
+                ),
+              },
+              {
+                id: "category",
+                header: "Category",
+                render: (t) =>
+                  t.spendCategory ?? (
+                    <Typography variant="body2" component="span" color="text.secondary">
+                      —
+                    </Typography>
+                  ),
+              },
+              {
+                id: "amount",
+                header: "Amount",
+                align: "right",
+                numeric: true,
+                render: (t) => (
+                  <Typography
+                    variant="body2"
+                    component="span"
+                    sx={{ fontWeight: 500, color: t.amount < 0 ? "error.main" : "success.main" }}
+                  >
+                    {formatGBP(t.amount)}
+                  </Typography>
+                ),
+              },
+            ]}
+            mobile={{
+              title: (t) => t.description,
+              meta: (t) => (
+                <Meta>
+                  {format(t.date, "d MMM yy")}
+                  {t.spendCategory ?? UNCATEGORISED}
+                </Meta>
+              ),
+              value: (t) => (
+                <Box component="span" sx={{ color: t.amount < 0 ? "error.main" : "success.main" }}>
+                  {formatGBP(t.amount)}
+                </Box>
+              ),
+            }}
+          />
+        </AccordionDetails>
+      </Accordion>
+    </Card>
   );
 }
 
@@ -172,82 +248,90 @@ function computeBreakdown(
   return Array.from(map.values()).sort((a, b) => b.total - a.total);
 }
 
+// Categorical colour per spend category, following the active colour
+// scheme. Uncategorised rows use the neutral outline colour.
 function colourForCategory(category: string): string {
-  if (category === UNCATEGORISED) return "var(--muted-foreground)";
+  if (category === UNCATEGORISED) return "var(--mui-palette-m3-outline)";
   const idx = SPEND_CATEGORIES.indexOf(category as SpendCategory);
-  if (idx === -1) return PALETTE[0];
-  return PALETTE[idx % PALETTE.length];
+  return categoryColor(idx === -1 ? 0 : idx);
 }
 
-function Breakdown({
-  rows,
-  cyclePaid,
-}: {
-  rows: BreakdownRow[];
-  cyclePaid: number;
-}) {
+function Breakdown({ rows, cyclePaid }: { rows: BreakdownRow[]; cyclePaid: number }) {
   if (rows.length === 0) return null;
 
   // Stacked bar uses positive parts only — refund-heavy categories go
   // with absolute share so the bar still renders cleanly.
-  const positiveTotal = rows.reduce(
-    (acc, r) => acc + Math.max(r.total, 0),
-    0,
-  );
+  const positiveTotal = rows.reduce((acc, r) => acc + Math.max(r.total, 0), 0);
 
   return (
-    <div className="px-5 py-4 border-b bg-muted/30">
-      <p className="label-eyebrow mb-3">By category — pay from these pots</p>
+    <Box sx={{ px: 2, py: 2 }}>
+      <Typography variant="overline" component="p" color="text.secondary" sx={{ mb: 1.5 }}>
+        By category — pay from these pots
+      </Typography>
 
       {/* Stacked horizontal bar */}
-      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted mb-3">
+      <Box
+        aria-hidden
+        sx={{
+          display: "flex",
+          height: 8,
+          width: "100%",
+          overflow: "hidden",
+          borderRadius: 4,
+          bgcolor: "m3.surfaceContainerHighest",
+          mb: 1.5,
+        }}
+      >
         {rows.map((row) => {
-          if (row.total <= 0) return null;
+          if (row.total <= 0 || positiveTotal <= 0) return null;
           const pct = (row.total / positiveTotal) * 100;
           return (
-            <div
+            <Box
               key={row.category}
-              className="h-full"
-              style={{
-                width: `${pct}%`,
-                background: colourForCategory(row.category),
-              }}
               title={`${row.category} · ${formatGBP(row.total)}`}
+              sx={{ height: "100%", width: `${pct}%`, bgcolor: colourForCategory(row.category) }}
             />
           );
         })}
-      </div>
+      </Box>
 
-      {/* List */}
-      <ul className="space-y-1">
+      {/* Stat rows: label left, value right */}
+      <Stack spacing={0.75}>
         {rows.map((row) => {
-          const pct = (row.total / cyclePaid) * 100;
+          const pct = cyclePaid > 0 ? (row.total / cyclePaid) * 100 : 0;
           return (
-            <li
+            <Box
               key={row.category}
-              className="grid grid-cols-[10px_1fr_auto_auto] items-center gap-2.5 text-[12px]"
+              sx={{
+                display: "grid",
+                gridTemplateColumns: "10px minmax(0, 1fr) 44px auto",
+                alignItems: "center",
+                columnGap: 1.5,
+              }}
             >
-              <span
-                className="size-2 rounded-[1px]"
-                style={{ background: colourForCategory(row.category) }}
+              <Box
+                sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: colourForCategory(row.category) }}
               />
-              <span className="font-medium truncate">
+              <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
                 {row.category}
-                <span className="text-muted-foreground/70 ml-1.5 text-[11px]">
+                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                   · {row.count} item{row.count === 1 ? "" : "s"}
-                </span>
-              </span>
-              <span className="text-muted-foreground tabular-nums w-12 text-right text-[11px]">
+                </Typography>
+              </Typography>
+              <Typography variant="caption" color="text.secondary" className="tabular" sx={{ textAlign: "right" }}>
                 {pct.toFixed(0)}%
-              </span>
-              <span className="font-mono tabular-nums w-20 text-right">
+              </Typography>
+              <Typography
+                variant="body2"
+                className="tabular"
+                sx={{ fontWeight: 500, textAlign: "right", minWidth: 80, whiteSpace: "nowrap" }}
+              >
                 {formatGBP(row.total)}
-              </span>
-            </li>
+              </Typography>
+            </Box>
           );
         })}
-      </ul>
-    </div>
+      </Stack>
+    </Box>
   );
 }
-

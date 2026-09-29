@@ -1,16 +1,23 @@
-import Link from "next/link";
 import { format, differenceInCalendarDays, startOfDay } from "date-fns";
-import { Cake, CalendarDays } from "lucide-react";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import CakeOutlined from "@mui/icons-material/CakeOutlined";
+import EventOutlined from "@mui/icons-material/EventOutlined";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
-import {
-  IMPORTANCE_LABELS,
-  type ImportanceLevel,
-} from "@/lib/categories";
+import { IMPORTANCE_LABELS, type ImportanceLevel } from "@/lib/categories";
 import { getSettings, giftAmountFor, resolveEventAmount } from "@/lib/settings";
-import { Kpi } from "@/components/kpi";
+import { PageHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { EventDialog } from "./_components/event-dialog";
-import { DeleteEventButton } from "./_components/delete-event-button";
+import { PeopleLink } from "./_components/people-link";
+import { deleteCalendarEvent } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -54,10 +61,28 @@ function nextOccurrence(date: Date, recursAnnually: boolean): Date {
   return thisYear;
 }
 
+function daysLabel(n: number): string {
+  if (n === 0) return "Today";
+  if (n === 1) return "Tomorrow";
+  return `In ${n} days`;
+}
+
+function countLabel(n: number): string {
+  return `${n} item${n === 1 ? "" : "s"}`;
+}
+
+interface MonthGroup {
+  label: string;
+  entries: UpcomingEntry[];
+  total: number;
+}
+
 export default async function CalendarPage() {
   const [events, people, settings] = await Promise.all([
     prisma.calendarEvent.findMany(),
-    prisma.person.findMany({ where: { birthday: { not: null } } }),
+    // Every person is loaded: those with a birthday become calendar
+    // entries, and all names are offered as suggestions in the event form.
+    prisma.person.findMany({ orderBy: { name: "asc" } }),
     getSettings(),
   ]);
 
@@ -67,6 +92,7 @@ export default async function CalendarPage() {
     MEDIUM: settings.giftMedium,
     HIGH: settings.giftHigh,
   };
+  const personOptions = Array.from(new Set(people.map((p) => p.name))).sort();
 
   // Compose: manual events + auto-derived birthdays
   const eventEntries: UpcomingEntry[] = events.map((e) => {
@@ -124,198 +150,274 @@ export default async function CalendarPage() {
     .filter((e) => e.daysUntil >= 0)
     .sort((a, b) => a.nextDate.getTime() - b.nextDate.getTime());
 
-  const totalUpcoming = upcoming.reduce(
-    (acc, e) => acc + e.effectiveAmount,
-    0,
-  );
+  const totalUpcoming = upcoming.reduce((acc, e) => acc + e.effectiveAmount, 0);
   const next30 = upcoming.filter((e) => e.daysUntil <= 30);
   const totalNext30 = next30.reduce((acc, e) => acc + e.effectiveAmount, 0);
+  const next90 = upcoming.filter((e) => e.daysUntil <= 90);
+  const totalNext90 = next90.reduce((acc, e) => acc + e.effectiveAmount, 0);
+
+  // Group chronologically by the month of the next occurrence. `upcoming`
+  // is already sorted, so Map insertion order is the display order.
+  const months = new Map<string, MonthGroup>();
+  for (const e of upcoming) {
+    const key = format(e.nextDate, "yyyy-MM");
+    let group = months.get(key);
+    if (!group) {
+      group = { label: format(e.nextDate, "MMMM yyyy"), entries: [], total: 0 };
+      months.set(key, group);
+    }
+    group.entries.push(e);
+    group.total += e.effectiveAmount;
+  }
+
+  const newDialog = <EventDialog giftAmounts={giftAmounts} personOptions={personOptions} />;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Looking ahead</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Calendar
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Birthdays come from{" "}
-            <Link href="/people" className="text-primary hover:underline underline-offset-4">
-              People
-            </Link>
-            . Use Add event for parties, anniversaries, one-off purchases.
-          </p>
-        </div>
-        <div className="flex items-end gap-3">
-          <div className="grid grid-cols-2 gap-3 min-w-[300px]">
-            <Kpi
-              label="Next 30 days"
-              value={formatGBP(totalNext30)}
-              sub={`${next30.length} item${next30.length === 1 ? "" : "s"}`}
-            />
-            <Kpi
-              label="All upcoming"
-              value={formatGBP(totalUpcoming)}
-              sub={`${upcoming.length} item${upcoming.length === 1 ? "" : "s"}`}
-            />
-          </div>
-          <EventDialog giftAmounts={giftAmounts} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Plan"
+        title="Calendar"
+        description="Birthdays come from People. Add events for parties, anniversaries and one-off purchases; importance fills in the budget from your settings."
+        actions={newDialog}
+      />
+
+      <KpiGrid columns={3}>
+        <Kpi
+          label="Next 30 days"
+          value={formatGBP(totalNext30)}
+          sub={countLabel(next30.length)}
+          emphasised
+          size="lg"
+        />
+        <Kpi label="Next 90 days" value={formatGBP(totalNext90)} sub={countLabel(next90.length)} />
+        <Kpi label="All upcoming" value={formatGBP(totalUpcoming)} sub={countLabel(upcoming.length)} />
+      </KpiGrid>
 
       {upcoming.length === 0 ? (
-        <div className="rounded-md border border-dashed p-12 text-center">
-          <p className="text-sm text-muted-foreground mb-3">
-            Nothing upcoming. Add a person with a birthday or an event to start
-            budgeting ahead.
-          </p>
-          <div className="flex justify-center gap-2">
-            <Link
-              href="/people"
-              className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-[13px] hover:bg-accent/50"
-            >
-              Add a person
-            </Link>
-            <EventDialog
-              giftAmounts={giftAmounts}
-              triggerVariant="outline"
-              triggerLabel="Add event"
-            />
-          </div>
-        </div>
+        <EmptyState
+          icon={<CakeOutlined fontSize="inherit" />}
+          title="Nothing upcoming"
+          description="Add a person with a birthday, or an event, to start budgeting ahead."
+          action={
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ alignItems: "center" }}>
+              <PeopleLink variant="button" label="Add a person" />
+              <EventDialog giftAmounts={giftAmounts} personOptions={personOptions} fabOnMobile={false} />
+            </Stack>
+          }
+        />
       ) : (
-        <ul className="rounded-md border bg-card divide-y">
-          {upcoming.map((e) => (
-            <EntryRow key={e.key} entry={e} giftAmounts={giftAmounts} />
+        <Stack spacing={2}>
+          {Array.from(months.entries()).map(([key, month]) => (
+            <Card key={key} component="section" aria-labelledby={`month-${key}`}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 2,
+                  px: 2,
+                  py: 1.5,
+                  borderBottom: "1px solid",
+                  borderColor: "divider",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                  <Typography id={`month-${key}`} variant="h5" component="h2" noWrap>
+                    {month.label}
+                  </Typography>
+                  <Chip size="small" variant="outlined" label={countLabel(month.entries.length)} />
+                </Box>
+                <Typography variant="h5" component="p" className="tabular" sx={{ whiteSpace: "nowrap" }}>
+                  {formatGBP(month.total)}
+                </Typography>
+              </Box>
+
+              <DataList<UpcomingEntry>
+                rows={month.entries}
+                getKey={(r) => r.key}
+                columns={[
+                  {
+                    id: "date",
+                    header: "Date",
+                    nowrap: true,
+                    render: (r) => (
+                      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                        <DateBadge date={r.nextDate} />
+                        <Box>
+                          <Typography variant="body2" component="p">
+                            {format(r.nextDate, "EEEE")}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary" component="p">
+                            {daysLabel(r.daysUntil)}
+                          </Typography>
+                        </Box>
+                      </Box>
+                    ),
+                  },
+                  {
+                    id: "title",
+                    header: "Title",
+                    render: (r) => {
+                      const sub = [
+                        r.kind === "EVENT" && r.recursAnnually ? "Repeats yearly" : null,
+                        r.notes,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ");
+                      return (
+                        <>
+                          <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                            {r.title}
+                          </Typography>
+                          {sub ? (
+                            <Typography variant="caption" color="text.secondary" component="p">
+                              {sub}
+                            </Typography>
+                          ) : null}
+                        </>
+                      );
+                    },
+                  },
+                  { id: "kind", header: "Kind", render: (r) => <KindChip kind={r.kind} /> },
+                  { id: "person", header: "Person", render: (r) => r.person ?? "—" },
+                  {
+                    id: "importance",
+                    header: "Importance",
+                    render: (r) => <ImportanceChip level={r.importance} />,
+                  },
+                  {
+                    id: "amount",
+                    header: "Budget",
+                    align: "right",
+                    numeric: true,
+                    render: (r) => <AmountCell entry={r} />,
+                  },
+                ]}
+                mobile={{
+                  title: (r) => r.title,
+                  meta: (r) => (
+                    <Meta>
+                      {format(r.nextDate, "EEE d MMM")}
+                      {daysLabel(r.daysUntil)}
+                      {r.kind === "EVENT" ? r.person : null}
+                      {r.kind === "BIRTHDAY" ? "Birthday" : "Event"}
+                    </Meta>
+                  ),
+                  value: (r) =>
+                    r.effectiveAmount > 0 ? (
+                      formatGBP(r.effectiveAmount)
+                    ) : (
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        No budget
+                      </Typography>
+                    ),
+                  valueSub: (r) =>
+                    r.kind === "EVENT" && r.amount !== null
+                      ? "Override"
+                      : r.importance
+                        ? `${IMPORTANCE_LABELS[r.importance]} tier`
+                        : null,
+                }}
+                actions={(r) =>
+                  r.kind === "EVENT" && r.eventInitial ? (
+                    <>
+                      <EventDialog
+                        giftAmounts={giftAmounts}
+                        personOptions={personOptions}
+                        initial={r.eventInitial}
+                      />
+                      <ConfirmDeleteButton
+                        label={`Delete ${r.title}`}
+                        heading="Delete event?"
+                        description={`“${r.title}” will be permanently removed. This can't be undone.`}
+                        onConfirm={deleteCalendarEvent.bind(null, r.eventInitial.id)}
+                      />
+                    </>
+                  ) : (
+                    <PeopleLink />
+                  )
+                }
+              />
+            </Card>
           ))}
-        </ul>
+        </Stack>
       )}
-    </div>
+    </>
   );
 }
 
-function EntryRow({
-  entry,
-  giftAmounts,
-}: {
-  entry: UpcomingEntry;
-  giftAmounts: { LOW: number; MEDIUM: number; HIGH: number };
-}) {
-  const Icon = entry.kind === "BIRTHDAY" ? Cake : CalendarDays;
-  const daysLabel =
-    entry.daysUntil === 0
-      ? "Today"
-      : entry.daysUntil === 1
-        ? "Tomorrow"
-        : `${entry.daysUntil} days`;
-  const dateLabel = format(entry.nextDate, "EEE d MMM yyyy");
-  const isOverridden = entry.kind === "EVENT" && entry.amount !== null;
-
+/** Day number over short month on a secondary-container tile. */
+function DateBadge({ date }: { date: Date }) {
   return (
-    <li className="grid grid-cols-[44px_84px_1fr_auto_auto_auto] items-center gap-4 px-5 py-3">
-      <div
-        className={`flex items-center justify-center size-9 rounded-md ${
-          entry.kind === "BIRTHDAY"
-            ? "bg-primary/10 text-primary"
-            : "bg-muted text-muted-foreground"
-        }`}
-      >
-        <Icon className="size-4" />
-      </div>
-
-      <div className="min-w-0">
-        <p className="font-mono text-[13px] tabular-nums tracking-tight">
-          {daysLabel}
-        </p>
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground/80 mt-0.5">
-          {dateLabel}
-        </p>
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-[14px] font-medium truncate">
-          {entry.title}
-          {entry.kind === "BIRTHDAY" ? (
-            <span className="ml-2 inline-block rounded-sm bg-primary/15 text-primary text-[9px] uppercase tracking-wider font-medium px-1 py-0.5 align-middle">
-              Birthday
-            </span>
-          ) : entry.recursAnnually ? (
-            <span className="ml-2 inline-block rounded-sm bg-muted text-muted-foreground text-[9px] uppercase tracking-wider font-medium px-1 py-0.5 align-middle">
-              Annual
-            </span>
-          ) : null}
-        </p>
-        {(entry.kind === "EVENT" && (entry.person || entry.notes)) ||
-        (entry.kind === "BIRTHDAY" && entry.notes) ? (
-          <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-            {entry.kind === "BIRTHDAY"
-              ? entry.notes
-              : [entry.person, entry.notes].filter(Boolean).join(" · ")}
-          </p>
-        ) : null}
-      </div>
-
-      {entry.importance ? (
-        <ImportancePill level={entry.importance} />
-      ) : (
-        <span />
-      )}
-
-      <div className="text-right tabular-nums w-24">
-        {entry.effectiveAmount > 0 ? (
-          <p className="font-mono text-[14px]">
-            {formatGBP(entry.effectiveAmount)}
-          </p>
-        ) : (
-          <span className="text-[11px] text-muted-foreground">No budget</span>
-        )}
-        {isOverridden && (
-          <p className="text-[10px] uppercase tracking-wider text-muted-foreground/70 mt-0.5">
-            Override
-          </p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-1">
-        {entry.kind === "EVENT" && entry.eventInitial ? (
-          <>
-            <EventDialog
-              giftAmounts={giftAmounts}
-              triggerVariant="ghost"
-              initial={entry.eventInitial}
-            />
-            <DeleteEventButton
-              id={entry.eventInitial.id}
-              title={entry.eventInitial.title}
-            />
-          </>
-        ) : (
-          <Link
-            href="/people"
-            className="text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground px-2"
-          >
-            Manage →
-          </Link>
-        )}
-      </div>
-    </li>
-  );
-}
-
-function ImportancePill({ level }: { level: ImportanceLevel }) {
-  const tone =
-    level === "HIGH"
-      ? "bg-primary/15 text-primary"
-      : level === "MEDIUM"
-        ? "bg-accent/20 text-accent-foreground"
-        : "bg-muted text-muted-foreground";
-  return (
-    <span
-      className={`rounded-sm text-[9px] uppercase tracking-wider font-medium px-1.5 py-0.5 ${tone}`}
+    <Box
+      aria-hidden
+      sx={{
+        width: 44,
+        height: 44,
+        borderRadius: "8px",
+        bgcolor: "m3.secondaryContainer",
+        color: "m3.onSecondaryContainer",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
     >
-      {IMPORTANCE_LABELS[level]}
-    </span>
+      <Typography component="span" variant="subtitle1" className="tabular" sx={{ lineHeight: 1.1 }}>
+        {format(date, "d")}
+      </Typography>
+      <Typography component="span" variant="caption" sx={{ lineHeight: 1.1, fontSize: "0.6875rem" }}>
+        {format(date, "MMM")}
+      </Typography>
+    </Box>
   );
 }
 
+function KindChip({ kind }: { kind: EntryKind }) {
+  return kind === "BIRTHDAY" ? (
+    <Chip size="small" icon={<CakeOutlined />} label="Birthday" />
+  ) : (
+    <Chip size="small" variant="outlined" icon={<EventOutlined />} label="Event" />
+  );
+}
+
+function ImportanceChip({ level }: { level: ImportanceLevel | null }) {
+  if (!level) {
+    return (
+      <Typography variant="body2" color="text.secondary" component="span">
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Chip
+      size="small"
+      variant="outlined"
+      color={level === "HIGH" ? "primary" : "default"}
+      label={IMPORTANCE_LABELS[level]}
+    />
+  );
+}
+
+function AmountCell({ entry }: { entry: UpcomingEntry }) {
+  const isOverridden = entry.kind === "EVENT" && entry.amount !== null;
+  return (
+    <>
+      {entry.effectiveAmount > 0 ? (
+        <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+          {formatGBP(entry.effectiveAmount)}
+        </Typography>
+      ) : (
+        <Typography variant="caption" color="text.secondary" component="span">
+          No budget
+        </Typography>
+      )}
+      {isOverridden ? (
+        <Typography variant="caption" color="text.secondary" component="p">
+          Override
+        </Typography>
+      ) : null}
+    </>
+  );
+}

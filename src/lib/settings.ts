@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { ImportanceLevel } from "@/lib/categories";
-import type { Theme } from "@/lib/themes";
+import { normaliseTheme, type Theme } from "@/lib/themes";
 
 export interface AppSettings {
   savingsPercent: number; // 0..1
@@ -19,7 +19,7 @@ const DEFAULTS: AppSettings = {
   giftLow: 20,
   giftMedium: 50,
   giftHigh: 100,
-  theme: "treasury",
+  theme: "light",
 };
 
 // Read-only fetch; ensures the singleton row exists. Falls back to
@@ -40,7 +40,7 @@ export async function getSettings(): Promise<AppSettings> {
       giftLow: row.giftLow,
       giftMedium: row.giftMedium,
       giftHigh: row.giftHigh,
-      theme: (row.theme ?? "treasury") as Theme,
+      theme: normaliseTheme(row.theme),
     };
   } catch {
     // No DB / no Settings table yet — return defaults so the layout

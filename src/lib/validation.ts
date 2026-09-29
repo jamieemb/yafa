@@ -97,7 +97,7 @@ export const settingsSchema = z
     giftLow: positiveAmountField("Low"),
     giftMedium: positiveAmountField("Medium"),
     giftHigh: positiveAmountField("High"),
-    theme: z.enum(THEMES).default("treasury"),
+    theme: z.enum(THEMES).default("light"),
   })
   .superRefine((val, ctx) => {
     const sum = val.savingsPercent + val.investPercent + val.freePercent;

@@ -1,79 +1,114 @@
 "use client";
 
-import { Pie, PieChart, Cell } from "recharts";
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-  type ChartConfig,
-} from "@/components/ui/chart";
+import { useSyncExternalStore } from "react";
+import Box from "@mui/material/Box";
+import { PieChart } from "@mui/x-charts/PieChart";
+import { useDrawingArea } from "@mui/x-charts/hooks";
 import { formatGBP } from "@/lib/money";
 
-interface Slice {
+export interface AllocationSlice {
   category: string;
   total: number;
+  /** Any CSS colour; categoryColor(i) variables work as SVG fills. */
   color: string;
 }
 
-export function AllocationChart({
-  data,
-  size = 220,
-}: {
-  data: Slice[];
-  size?: number;
-}) {
+interface Props {
+  data: AllocationSlice[];
+  /** Chart height in px. Width follows the container. */
+  height?: number;
+}
+
+/**
+ * Donut of this month's committed outflow by pot. The legend is drawn
+ * by the page so it can sit beside the chart on desktop and below it on
+ * phones; the total is written into the hole.
+ */
+export function AllocationChart({ data, height = 260 }: Props) {
   const total = data.reduce((acc, d) => acc + d.total, 0);
-  const config: ChartConfig = Object.fromEntries(
-    data.map((d) => [d.category, { label: d.category, color: d.color }]),
-  );
+  // x-charts measures its container for width; on the server there is
+  // nothing to measure and it warns, so render the chart client-side
+  // only and hold its space in the meantime.
+  const mounted = useMounted();
+
+  if (!mounted) {
+    return <Box sx={{ width: "100%", height }} aria-hidden />;
+  }
 
   return (
-    <div
-      className="relative shrink-0"
-      style={{ width: size, height: size }}
-    >
-      <ChartContainer config={config} className="w-full h-full">
-        <PieChart>
-          <ChartTooltip
-            cursor={false}
-            content={
-              <ChartTooltipContent
-                nameKey="category"
-                formatter={(value, _name, item) => (
-                  <div className="flex items-center justify-between gap-3 w-full">
-                    <span className="text-muted-foreground">
-                      {item?.payload?.category}
-                    </span>
-                    <span className="tabular-nums font-mono">
-                      {formatGBP(Number(value))}
-                    </span>
-                  </div>
-                )}
-              />
-            }
-          />
-          <Pie
-            data={data}
-            dataKey="total"
-            nameKey="category"
-            innerRadius={size * 0.32}
-            outerRadius={size * 0.46}
-            strokeWidth={2}
-            stroke="var(--card)"
-            paddingAngle={1.5}
-          >
-            {data.map((d, i) => (
-              <Cell key={i} fill={d.color} />
-            ))}
-          </Pie>
-        </PieChart>
-      </ChartContainer>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className="label-eyebrow">Outflow</span>
-        <span className="font-mono text-sm tabular-nums tracking-tight mt-0.5">
-          {formatGBP(total)}
-        </span>
-      </div>
-    </div>
+    <Box sx={{ width: "100%", minWidth: 0 }}>
+      <PieChart
+        height={height}
+        margin={8}
+        hideLegend
+        series={[
+          {
+            data: data.map((d) => ({
+              id: d.category,
+              value: d.total,
+              label: d.category,
+              color: d.color,
+            })),
+            innerRadius: "64%",
+            outerRadius: "100%",
+            paddingAngle: 2,
+            cornerRadius: 4,
+            highlightScope: { fade: "global", highlight: "item" },
+            valueFormatter: (item) => formatGBP(item.value),
+          },
+        ]}
+      >
+        <CenterLabel caption="Outflow" value={formatGBP(total)} />
+      </PieChart>
+    </Box>
+  );
+}
+
+const subscribeNoop = () => () => {};
+/** True after hydration; false during SSR and the first client render. */
+function useMounted(): boolean {
+  return useSyncExternalStore(
+    subscribeNoop,
+    () => true,
+    () => false,
+  );
+}
+
+/** Two-line label in the middle of the donut, positioned from the drawing area. */
+function CenterLabel({ caption, value }: { caption: string; value: string }) {
+  const { left, top, width, height } = useDrawingArea();
+  const cx = left + width / 2;
+  const cy = top + height / 2;
+  return (
+    <g aria-hidden style={{ pointerEvents: "none" }}>
+      <text
+        x={cx}
+        y={cy - 10}
+        textAnchor="middle"
+        dominantBaseline="central"
+        style={{
+          fill: "var(--mui-palette-text-secondary)",
+          fontSize: "0.75rem",
+          fontWeight: 500,
+          letterSpacing: "0.042em",
+        }}
+      >
+        {caption}
+      </text>
+      <text
+        x={cx}
+        y={cy + 10}
+        textAnchor="middle"
+        dominantBaseline="central"
+        className="tabular"
+        style={{
+          fill: "var(--mui-palette-text-primary)",
+          fontSize: "1rem",
+          fontWeight: 500,
+        }}
+      >
+        {value}
+      </text>
+    </g>
   );
 }

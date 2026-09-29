@@ -1,6 +1,13 @@
 import { format } from "date-fns";
+import Box from "@mui/material/Box";
+import Card from "@mui/material/Card";
+import Chip from "@mui/material/Chip";
+import Stack from "@mui/material/Stack";
+import Typography from "@mui/material/Typography";
+import EventRepeatOutlined from "@mui/icons-material/EventRepeatOutlined";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
+import { categoryColor } from "@/lib/pot-colors";
 import {
   BUDGET_CATEGORIES,
   FREQUENCY_LABELS,
@@ -8,30 +15,18 @@ import {
   type BudgetCategory,
   type Frequency,
 } from "@/lib/categories";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { Kpi, KpiGrid } from "@/components/kpi";
+import { EmptyState } from "@/components/empty-state";
+import { DataList, Meta } from "@/components/data-list";
+import { ConfirmDeleteButton } from "@/components/confirm-delete-button";
 import { RecurringDialog } from "./_components/recurring-dialog";
-import { DeleteRecurringButton } from "./_components/delete-recurring-button";
 import { ActiveToggle } from "./_components/active-toggle";
+import { deleteRecurringItem } from "./actions";
 
 export const dynamic = "force-dynamic";
 
-const PALETTE = [
-  "#003A6C",
-  "#FD8973",
-  "#4F7E5C",
-  "#B8956A",
-  "#6B7E8C",
-  "#2E5783",
-  "#E0A993",
-  "#84A48F",
-];
+type Item = Awaited<ReturnType<typeof prisma.recurringItem.findMany>>[number];
 
 export default async function RecurringPage() {
   const items = await prisma.recurringItem.findMany({
@@ -60,171 +55,171 @@ export default async function RecurringPage() {
     ),
   ).sort();
 
-  const groups = new Map<
-    BudgetCategory,
-    { items: typeof items; total: number }
-  >();
-  for (const cat of BUDGET_CATEGORIES) {
-    groups.set(cat, { items: [], total: 0 });
-  }
+  const groups = new Map<BudgetCategory, { items: Item[]; total: number }>();
+  for (const cat of BUDGET_CATEGORIES) groups.set(cat, { items: [], total: 0 });
   for (const item of items) {
     if (!item.budgetCategory) continue;
     const g = groups.get(item.budgetCategory as BudgetCategory);
     if (!g) continue;
     g.items.push(item);
-    if (item.active) {
-      g.total += monthlyEquivalent(item.amount, item.frequency as Frequency);
-    }
+    if (item.active) g.total += monthlyEquivalent(item.amount, item.frequency as Frequency);
   }
   const populated = Array.from(groups.entries())
     .filter(([, g]) => g.items.length > 0)
     .sort(([, a], [, b]) => b.total - a.total);
 
-  const outflowMonthly = items
-    .filter((i) => i.active)
-    .reduce(
-      (acc, i) =>
-        acc + monthlyEquivalent(i.amount, i.frequency as Frequency),
-      0,
-    );
+  const activeItems = items.filter((i) => i.active);
+  const outflowMonthly = activeItems.reduce(
+    (acc, i) => acc + monthlyEquivalent(i.amount, i.frequency as Frequency),
+    0,
+  );
+
+  const newDialog = <RecurringDialog accountOptions={accountOptions} />;
 
   return (
-    <div className="space-y-8">
-      {/* Header strip */}
-      <div className="flex flex-wrap items-end justify-between gap-4 border-b pb-6">
-        <div>
-          <p className="label-eyebrow">Books</p>
-          <h1 className="text-2xl font-semibold tracking-[-0.02em] mt-1">
-            Recurring
-          </h1>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            Bills, subscriptions, finance payments and pre-allocated budgets.
-          </p>
-        </div>
-        <div className="flex items-end gap-6">
-          <div className="text-right">
-            <p className="label-eyebrow">Outflow / mo</p>
-            <p className="font-mono text-2xl tabular-nums tracking-[-0.02em] mt-1">
-              {formatGBP(outflowMonthly)}
-            </p>
-          </div>
-          <RecurringDialog accountOptions={accountOptions} />
-        </div>
-      </div>
+    <>
+      <PageHeader
+        eyebrow="Books"
+        title="Recurring"
+        description="Bills, subscriptions, finance payments and pre-allocated budget pots."
+        actions={newDialog}
+      />
+
+      <KpiGrid columns={3}>
+        <Kpi label="Outflow per month" value={formatGBP(outflowMonthly)} sub="Active items, monthly equivalent" emphasised size="lg" />
+        <Kpi label="Active items" value={String(activeItems.length)} sub={`${items.length - activeItems.length} paused`} />
+        <Kpi label="Pots in use" value={String(populated.length)} sub={`of ${BUDGET_CATEGORIES.length} pots`} />
+      </KpiGrid>
 
       {items.length === 0 ? (
-        <div className="rounded-md border border-dashed p-12 text-center">
-          <p className="text-sm text-muted-foreground">
-            No recurring items yet. Click &ldquo;New item&rdquo; to add your
-            first.
-          </p>
-        </div>
+        <EmptyState
+          icon={<EventRepeatOutlined fontSize="inherit" />}
+          title="No recurring items yet"
+          description="Add your bills, subscriptions and budget pots so the dashboard can work out what to set aside each month."
+          action={<RecurringDialog accountOptions={accountOptions} fabOnMobile={false} />}
+        />
       ) : (
-        <div className="space-y-6">
+        <Stack spacing={2}>
           {populated.map(([cat, group], i) => (
-            <section key={cat} className="rounded-md border bg-card overflow-hidden">
-              <div className="flex items-baseline justify-between gap-3 px-5 py-3.5 border-b">
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className="size-2.5 rounded-[2px]"
-                    style={{ background: PALETTE[i % PALETTE.length] }}
-                  />
-                  <h2 className="text-[13px] font-semibold">{cat}</h2>
-                  <span className="label-eyebrow">
-                    {group.items.length} item
-                    {group.items.length === 1 ? "" : "s"}
-                  </span>
-                </div>
-                <div className="font-mono tabular-nums text-base">
+            <Card key={cat} component="section" aria-labelledby={`pot-${i}`}>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 2,
+                  px: 2,
+                  py: 1.5,
+                  borderBottom: "1px solid",
+                  borderColor: "divider",
+                }}
+              >
+                <Box sx={{ display: "flex", alignItems: "center", gap: 1.5, minWidth: 0 }}>
+                  <Box sx={{ width: 12, height: 12, borderRadius: 1, bgcolor: categoryColor(i), flexShrink: 0 }} />
+                  <Typography id={`pot-${i}`} variant="h5" component="h2" noWrap>
+                    {cat}
+                  </Typography>
+                  <Chip size="small" variant="outlined" label={`${group.items.length} item${group.items.length === 1 ? "" : "s"}`} />
+                </Box>
+                <Typography variant="h5" component="p" className="tabular" sx={{ whiteSpace: "nowrap" }}>
                   {formatGBP(group.total)}
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground ml-2">
+                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
                     /mo
-                  </span>
-                </div>
-              </div>
-              <Table>
-                <TableHeader>
-                  <TableRow className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                    <TableHead className="h-9">Name</TableHead>
-                    <TableHead className="h-9">Account</TableHead>
-                    <TableHead className="h-9">Frequency</TableHead>
-                    <TableHead className="h-9 text-center">Day</TableHead>
-                    <TableHead className="h-9">Ends</TableHead>
-                    <TableHead className="h-9 text-right">Amount</TableHead>
-                    <TableHead className="h-9 text-center">Active</TableHead>
-                    <TableHead className="h-9" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {group.items.map((item) => (
-                    <TableRow
-                      key={item.id}
-                      className={item.active ? undefined : "opacity-50"}
-                    >
-                      <TableCell className="text-[13px] font-medium">
-                        {item.name}
-                        {item.notes ? (
-                          <div className="text-[11px] text-muted-foreground mt-0.5">
-                            {item.notes}
-                          </div>
+                  </Typography>
+                </Typography>
+              </Box>
+
+              <DataList<Item>
+                rows={group.items}
+                getKey={(r) => r.id}
+                muted={(r) => !r.active}
+                columns={[
+                  {
+                    id: "name",
+                    header: "Name",
+                    render: (r) => (
+                      <>
+                        <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                          {r.name}
+                        </Typography>
+                        {r.notes ? (
+                          <Typography variant="caption" color="text.secondary">
+                            {r.notes}
+                          </Typography>
                         ) : null}
-                      </TableCell>
-                      <TableCell className="text-[11px] text-muted-foreground">
-                        {item.bankAccount ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-[12px] text-muted-foreground">
-                        {FREQUENCY_LABELS[item.frequency as Frequency] ??
-                          item.frequency}
-                      </TableCell>
-                      <TableCell className="text-center text-muted-foreground tabular-nums text-[12px]">
-                        {item.dayOfMonth ?? "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground text-[12px]">
-                        {item.endDate ? (
-                          format(item.endDate, "d MMM yyyy")
-                        ) : (
-                          <span className="text-[11px]">Ongoing</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-mono text-[13px]">
-                        {formatGBP(item.amount)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <ActiveToggle id={item.id} active={item.active} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center justify-end gap-1">
-                          <RecurringDialog
-                            accountOptions={accountOptions}
-                            triggerVariant="ghost"
-                            initial={{
-                              id: item.id,
-                              name: item.name,
-                              amount: item.amount,
-                              budgetCategory: item.budgetCategory,
-                              bankAccount: item.bankAccount,
-                              frequency: item.frequency,
-                              dayOfMonth: item.dayOfMonth,
-                              startDate: item.startDate,
-                              endDate: item.endDate,
-                              notes: item.notes,
-                              active: item.active,
-                            }}
-                          />
-                          <DeleteRecurringButton
-                            id={item.id}
-                            name={item.name}
-                          />
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </section>
+                      </>
+                    ),
+                  },
+                  { id: "account", header: "Account", render: (r) => r.bankAccount ?? "—" },
+                  {
+                    id: "frequency",
+                    header: "Frequency",
+                    render: (r) => FREQUENCY_LABELS[r.frequency as Frequency] ?? r.frequency,
+                  },
+                  { id: "day", header: "Day", align: "center", numeric: true, render: (r) => r.dayOfMonth ?? "—" },
+                  {
+                    id: "ends",
+                    header: "Ends",
+                    nowrap: true,
+                    render: (r) => (r.endDate ? format(r.endDate, "d MMM yyyy") : "Ongoing"),
+                  },
+                  {
+                    id: "amount",
+                    header: "Amount",
+                    align: "right",
+                    numeric: true,
+                    render: (r) => (
+                      <Typography variant="body2" component="span" sx={{ fontWeight: 500 }}>
+                        {formatGBP(r.amount)}
+                      </Typography>
+                    ),
+                  },
+                ]}
+                mobile={{
+                  title: (r) => r.name,
+                  meta: (r) => (
+                    <Meta>
+                      {r.bankAccount}
+                      {FREQUENCY_LABELS[r.frequency as Frequency] ?? r.frequency}
+                      {r.dayOfMonth != null ? `Day ${r.dayOfMonth}` : null}
+                      {r.endDate ? `Ends ${format(r.endDate, "d MMM yyyy")}` : null}
+                    </Meta>
+                  ),
+                  value: (r) => formatGBP(r.amount),
+                  valueSub: (r) => (r.active ? null : "Paused"),
+                }}
+                actions={(r) => (
+                  <>
+                    <ActiveToggle id={r.id} active={r.active} name={r.name} />
+                    <RecurringDialog
+                      accountOptions={accountOptions}
+                      initial={{
+                        id: r.id,
+                        name: r.name,
+                        amount: r.amount,
+                        budgetCategory: r.budgetCategory,
+                        bankAccount: r.bankAccount,
+                        frequency: r.frequency,
+                        dayOfMonth: r.dayOfMonth,
+                        startDate: r.startDate,
+                        endDate: r.endDate,
+                        notes: r.notes,
+                        active: r.active,
+                      }}
+                    />
+                    <ConfirmDeleteButton
+                      label={`Delete ${r.name}`}
+                      heading="Delete recurring item?"
+                      description={`“${r.name}” will be permanently removed. This can't be undone.`}
+                      onConfirm={deleteRecurringItem.bind(null, r.id)}
+                    />
+                  </>
+                )}
+              />
+            </Card>
           ))}
-        </div>
+        </Stack>
       )}
-    </div>
+    </>
   );
 }

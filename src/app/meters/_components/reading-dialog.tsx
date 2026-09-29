@@ -1,32 +1,34 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { METER_PRESETS } from "@/lib/admin";
+import Autocomplete from "@mui/material/Autocomplete";
+import Box from "@mui/material/Box";
+import IconButton from "@mui/material/IconButton";
+import Stack from "@mui/material/Stack";
+import TextField from "@mui/material/TextField";
+import Tooltip from "@mui/material/Tooltip";
+import AddRounded from "@mui/icons-material/AddRounded";
+import { toast } from "@/components/toast";
+import { FormDialog } from "@/components/form-dialog";
+import { ResponsiveAction } from "@/components/responsive-action";
+import { METER_PRESETS, formatReading } from "@/lib/admin";
 import { createReading } from "../actions";
 
+export interface MeterOption {
+  meter: string;
+  unit: string | null;
+}
+
 interface Props {
-  // Existing meter labels (merged with presets for the datalist).
-  meterOptions?: string[];
-  // Pre-select a meter + unit when adding from a specific meter's card.
+  /** Existing meters (merged with METER_PRESETS for the autocomplete and unit auto-fill). */
+  meterOptions?: MeterOption[];
+  /** Pre-select a meter + unit when adding from a specific meter's card. */
   defaultMeter?: string;
   defaultUnit?: string;
-  triggerLabel?: string;
-  triggerVariant?: "default" | "ghost" | "outline";
+  /** "primary" is the page's Add action (FAB on phones); "icon" is a compact per-card button. */
+  trigger?: "primary" | "icon";
+  /** For the primary trigger: render as a FAB on phones (default) or a plain button. */
+  fabOnMobile?: boolean;
 }
 
 function todayIso(): string {
@@ -41,176 +43,159 @@ export function ReadingDialog({
   meterOptions = [],
   defaultMeter,
   defaultUnit,
-  triggerLabel,
-  triggerVariant = "default",
+  trigger = "primary",
+  fabOnMobile = true,
 }: Props) {
   const [open, setOpen] = useState(false);
 
+  // Presets first, then real meters (whose stored unit wins over the preset's).
+  const knownUnits = new Map<string, string>();
+  for (const p of METER_PRESETS) knownUnits.set(p.meter.toLowerCase(), p.unit);
+  for (const o of meterOptions) if (o.unit) knownUnits.set(o.meter.toLowerCase(), o.unit);
   const allMeters = Array.from(
-    new Set([...METER_PRESETS.map((p) => p.meter), ...meterOptions]),
+    new Set([...METER_PRESETS.map((p) => p.meter), ...meterOptions.map((o) => o.meter)]),
   );
 
+  const label = defaultMeter ? `Add ${defaultMeter} reading` : "Add reading";
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger
-        render={
-          <Button variant={triggerVariant} size={defaultMeter ? "sm" : "default"} />
-        }
-      >
-        {defaultMeter ? (
-          triggerLabel ?? "Add reading"
-        ) : (
-          <>
-            <Plus className="size-4" />
-            {triggerLabel ?? "Add reading"}
-          </>
-        )}
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Add meter reading</DialogTitle>
-          <DialogDescription>
-            Log a reading; usage is worked out from the previous one.
-          </DialogDescription>
-        </DialogHeader>
-        {open && (
-          <ReadingForm
-            allMeters={allMeters}
-            defaultMeter={defaultMeter}
-            defaultUnit={defaultUnit}
-            onDone={() => setOpen(false)}
-          />
-        )}
-      </DialogContent>
-    </Dialog>
+    <>
+      {trigger === "icon" ? (
+        <Tooltip title={label}>
+          <IconButton aria-label={label} onClick={() => setOpen(true)}>
+            <AddRounded />
+          </IconButton>
+        </Tooltip>
+      ) : (
+        <ResponsiveAction label="Add reading" onClick={() => setOpen(true)} fabOnMobile={fabOnMobile} />
+      )}
+      {open ? (
+        <ReadingForm
+          allMeters={allMeters}
+          knownUnits={knownUnits}
+          defaultMeter={defaultMeter}
+          defaultUnit={defaultUnit}
+          onClose={() => setOpen(false)}
+        />
+      ) : null}
+    </>
   );
 }
 
-function ReadingForm({
-  allMeters,
-  defaultMeter,
-  defaultUnit,
-  onDone,
-}: {
+interface FormProps {
   allMeters: string[];
+  knownUnits: Map<string, string>;
   defaultMeter?: string;
   defaultUnit?: string;
-  onDone: () => void;
-}) {
+  onClose: () => void;
+}
+
+function ReadingForm({ allMeters, knownUnits, defaultMeter, defaultUnit, onClose }: FormProps) {
   const [meter, setMeter] = useState(defaultMeter ?? "");
   const [unit, setUnit] = useState(defaultUnit ?? "");
+  // The unit follows the chosen meter's preset until the user edits it
+  // themselves — then it's theirs and we stop touching it.
+  const [unitAuto, setUnitAuto] = useState(true);
   const [date, setDate] = useState(todayIso());
   const [value, setValue] = useState("");
   const [notes, setNotes] = useState("");
   const [pending, startTransition] = useTransition();
 
-  // Prefill the unit from a known preset when the meter matches and the
-  // unit field is still empty (don't clobber a manual entry).
+  const valid = meter.trim().length > 0 && date !== "" && value !== "" && Number(value) >= 0;
+
   function onMeterChange(v: string) {
     setMeter(v);
-    if (!unit) {
-      const preset = METER_PRESETS.find(
-        (p) => p.meter.toLowerCase() === v.trim().toLowerCase(),
-      );
-      if (preset) setUnit(preset.unit);
-    }
+    if (unitAuto) setUnit(knownUnits.get(v.trim().toLowerCase()) ?? "");
+  }
+
+  function onUnitChange(v: string) {
+    setUnit(v);
+    setUnitAuto(false);
   }
 
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const formData = new FormData(e.currentTarget);
+    if (!valid) return;
+    // Field names match meterReadingSchema in src/lib/validation.ts.
+    const fd = new FormData();
+    fd.set("meter", meter.trim());
+    fd.set("date", date);
+    fd.set("value", value);
+    fd.set("unit", unit.trim());
+    fd.set("notes", notes.trim());
+
     startTransition(async () => {
       try {
-        await createReading(formData);
-        toast.success("Reading saved");
-        onDone();
+        await createReading(fd);
+        toast.success("Reading saved", `${meter.trim()} · ${formatReading(Number(value), unit.trim() || null)}`);
+        onClose();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Failed to save");
+        toast.error("Could not save", err instanceof Error ? err.message : undefined);
       }
     });
   }
 
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="meter">Meter</Label>
-        <Input
-          id="meter"
-          name="meter"
-          list="meter-options"
-          value={meter}
-          onChange={(e) => onMeterChange(e.target.value)}
-          placeholder="e.g. Electricity"
-          required
-          maxLength={60}
-          autoFocus
+    <FormDialog
+      open
+      onClose={onClose}
+      title="Add meter reading"
+      description="Log a reading; usage is worked out from the previous one."
+      onSubmit={onSubmit}
+      submitLabel="Save reading"
+      pending={pending}
+      submitDisabled={!valid}
+      maxWidth="xs"
+    >
+      <Stack spacing={2.5}>
+        <Autocomplete
+          freeSolo
+          options={allMeters}
+          inputValue={meter}
+          onInputChange={(_, v) => onMeterChange(v)}
+          renderInput={(params) => (
+            <TextField {...params} label="Meter" placeholder="e.g. Electricity" required autoFocus={!defaultMeter} />
+          )}
         />
-        <datalist id="meter-options">
-          {allMeters.map((m) => (
-            <option key={m} value={m} />
-          ))}
-        </datalist>
-      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label htmlFor="value">Reading</Label>
-          <Input
-            id="value"
-            name="value"
+        <Box sx={{ display: "grid", gap: 2.5, gridTemplateColumns: "2fr 1fr" }}>
+          <TextField
+            label="Reading"
             type="number"
-            step="any"
-            min="0"
+            inputMode="decimal"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             required
+            autoFocus={Boolean(defaultMeter)}
+            slotProps={{ htmlInput: { min: 0, step: "any" } }}
           />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="unit">Unit</Label>
-          <Input
-            id="unit"
-            name="unit"
+          <TextField
+            label="Unit"
             value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            placeholder="e.g. kWh, m³"
-            maxLength={20}
+            onChange={(e) => onUnitChange(e.target.value)}
+            placeholder="kWh"
+            slotProps={{ htmlInput: { maxLength: 20 } }}
           />
-        </div>
-      </div>
+        </Box>
 
-      <div className="space-y-2">
-        <Label htmlFor="date">Date</Label>
-        <Input
-          id="date"
-          name="date"
+        <TextField
+          label="Date"
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
           required
+          slotProps={{ inputLabel: { shrink: true } }}
         />
-      </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="notes">Notes</Label>
-        <Textarea
-          id="notes"
-          name="notes"
-          rows={2}
-          placeholder="Optional"
+        <TextField
+          label="Notes"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
+          multiline
+          minRows={2}
+          placeholder="Optional"
         />
-      </div>
-
-      <DialogFooter>
-        <Button type="button" variant="ghost" onClick={onDone} disabled={pending}>
-          Cancel
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving…" : "Save reading"}
-        </Button>
-      </DialogFooter>
-    </form>
+      </Stack>
+    </FormDialog>
   );
 }
