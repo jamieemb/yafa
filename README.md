@@ -21,6 +21,12 @@ Built for one user — assumes deployment behind your LAN/VPN. No auth in v1.
 - **Dashboard** with month nav, smart 40/35/25 discretionary split
   (configurable in settings), allocation donut, by-account breakdown,
   upcoming birthdays/events.
+- **Month setup wizard** — a guided five-step run through each month:
+  income per person (with "add again" suggestions from previous months),
+  birthdays and events, a review of recurring costs, car trip import,
+  then an allocation step where the savings / investments / free-spend
+  split can be overridden with linked sliders. The dashboard shows the
+  chosen plan and nags until the month is set up.
 - **People + calendar** for tracking gift budgets by importance tier.
 - **Life admin** — renewals (MOT, insurance, licences) with due-soon
   reminders, meter readings, and PCP/lease mileage tracking with car
@@ -87,6 +93,7 @@ src/
   app/
     api/             health endpoint
     dashboard/       monthly outflow + allocation + smart split
+    setup/           month setup wizard (5 steps, allocation override)
     recurring/       outflow CRUD grouped by pot
     income/          per-month income entries
     transactions/    imported rows + cycle settle sheet
@@ -109,6 +116,9 @@ src/
   lib/
     theme.ts         MUI theme expressing Material 3
     m3-colors.ts     M3 colour schemes from a seed colour
+    budget.ts        one computation of a month's income / committed / left over
+    month.ts         budget-month helpers (YYYY-MM ↔ UTC first-of-month)
+    plan.ts          wizard steps + MonthPlan helpers
     importers/       NatWest, Amex, Monzo, car-trip CSV parsers
     subset-sum.ts    pay-cycle matcher
     mileage.ts       allowance / pace / projection maths

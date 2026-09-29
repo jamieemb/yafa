@@ -32,6 +32,12 @@ interface Props {
   initial?: IncomeInitial;
   /** Month being viewed, "YYYY-MM" — the default budget month for new entries. */
   defaultMonthIso: string;
+  /**
+   * Keep new entries on `defaultMonthIso` regardless of the paid date
+   * (used by the month setup wizard, where the month is the whole point).
+   * Without it, a paid date late in the month rolls the budget month on.
+   */
+  lockMonth?: boolean;
   personOptions?: string[];
   accountOptions?: string[];
   /** For the create trigger: render as a FAB on phones (default) or a plain button. */
@@ -41,6 +47,7 @@ interface Props {
 export function IncomeDialog({
   initial,
   defaultMonthIso,
+  lockMonth = false,
   personOptions = [],
   accountOptions = [],
   fabOnMobile = true,
@@ -63,6 +70,7 @@ export function IncomeDialog({
         <IncomeForm
           initial={initial}
           defaultMonthIso={defaultMonthIso}
+          lockMonth={lockMonth}
           personOptions={personOptions}
           accountOptions={accountOptions}
           onClose={() => setOpen(false)}
@@ -108,28 +116,31 @@ const MONTH_ISO = /^\d{4}-\d{2}$/;
 interface FormProps {
   initial?: IncomeInitial;
   defaultMonthIso: string;
+  lockMonth: boolean;
   personOptions: string[];
   accountOptions: string[];
   onClose: () => void;
 }
 
-function IncomeForm({ initial, defaultMonthIso, personOptions, accountOptions, onClose }: FormProps) {
+function IncomeForm({ initial, defaultMonthIso, lockMonth, personOptions, accountOptions, onClose }: FormProps) {
   const isEdit = Boolean(initial);
 
   // For new entries, default paidDate to today and let it drive the
-  // budget month. For edits, use whatever's stored.
+  // budget month (unless the month is locked). For edits, use whatever's stored.
   const initialPaidIso = initial ? dateInputValue(initial.paidDate) : todayLocalIso();
   const initialMonthIso = initial
     ? monthInputValue(initial.month, defaultMonthIso)
-    : initialPaidIso
-      ? inferBudgetMonthIsoFromPaidDate(initialPaidIso) || defaultMonthIso
-      : defaultMonthIso;
+    : lockMonth
+      ? defaultMonthIso
+      : initialPaidIso
+        ? inferBudgetMonthIsoFromPaidDate(initialPaidIso) || defaultMonthIso
+        : defaultMonthIso;
 
   const [paidDate, setPaidDate] = useState(initialPaidIso);
   const [month, setMonth] = useState(initialMonthIso);
   // Lock auto-update once the user has manually changed the month, so
   // their override isn't overwritten when they tweak paidDate after.
-  const [monthIsAuto, setMonthIsAuto] = useState(!isEdit);
+  const [monthIsAuto, setMonthIsAuto] = useState(!isEdit && !lockMonth);
 
   const [person, setPerson] = useState(initial?.person ?? "");
   const [label, setLabel] = useState(initial?.label ?? "");

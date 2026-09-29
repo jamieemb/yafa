@@ -294,3 +294,22 @@ model CarTrip {
   @@index([contractId, startAt])
   @@index([importId])
 }
+
+// ── Month setup ─────────────────────────────────────────────────────────
+// State for the monthly setup wizard (/setup) and the discretionary
+// allocation the user settled on for that month. One row per budget
+// month; `month` is the first of the month at 00:00 UTC, like
+// IncomeEntry.month. When the three amounts are null the dashboard falls
+// back to the percentage split in Settings.
+model MonthPlan {
+  id             String    @id @default(cuid())
+  month          DateTime  @unique
+  completedSteps String    @default("") // comma-separated wizard step ids
+  completedAt    DateTime?
+  savingsAmount  Float?
+  investAmount   Float?
+  freeAmount     Float?
+  notes          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}

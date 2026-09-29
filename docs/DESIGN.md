@@ -21,6 +21,15 @@ adding or changing any page.
 
 Import MUI components by path (`@mui/material/Button`) for tree-shaking.
 
+## Budget numbers
+
+Anything that shows a month's income, committed outflow, left-over or
+the savings/investments/free split must go through
+`computeMonthBudget()` in `src/lib/budget.ts` (used by the dashboard and
+the setup wizard). Month parsing lives in `src/lib/month.ts`; wizard
+steps and `MonthPlan` helpers in `src/lib/plan.ts`. Don't re-derive
+these numbers in a page.
+
 ## Server vs client
 
 MUI components carry `"use client"` internally, so a Server Component

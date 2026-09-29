@@ -17,7 +17,15 @@ import SavingsOutlined from "@mui/icons-material/SavingsOutlined";
 import { prisma } from "@/lib/db";
 import { formatGBP } from "@/lib/money";
 import { categoryColor } from "@/lib/pot-colors";
-import { getSettings, giftAmountFor, resolveEventAmount } from "@/lib/settings";
+import { computeMonthBudget, type MonthEvent } from "@/lib/budget";
+import {
+  currentMonthIso,
+  dateToIso,
+  isValidMonthIso,
+  isoToFirstOfMonth,
+  shiftMonths,
+} from "@/lib/month";
+import { WIZARD_STEPS, setupHref } from "@/lib/plan";
 import {
   BUDGET_CATEGORIES,
   IMPORTANCE_LABELS,
@@ -47,60 +55,6 @@ interface PageProps {
   searchParams: Promise<{ month?: string }>;
 }
 
-function isoToFirstOfMonth(yyyymm: string): Date {
-  const [yStr, mStr] = yyyymm.split("-");
-  return new Date(Date.UTC(Number(yStr), Number(mStr) - 1, 1));
-}
-
-function dateToIso(d: Date): string {
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
-
-function shiftMonths(d: Date, delta: number): Date {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + delta, 1));
-}
-
-function currentMonthIso(): string {
-  const now = new Date();
-  return dateToIso(
-    new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-  );
-}
-
-interface MonthEvent {
-  kind: "BIRTHDAY" | "EVENT";
-  title: string;
-  date: Date;
-  amount: number;
-  importance: ImportanceLevel | null;
-}
-
-// Compute the next occurrence of a recurring event within a given
-// budget month. For non-recurring events, return the original date if
-// it falls in the month (else null). For recurring, the next-this-year
-// (or next year) occurrence — included if it's within the month.
-function occurrenceInMonth(
-  base: Date,
-  recursAnnually: boolean,
-  monthStart: Date,
-  monthEndExclusive: Date,
-): Date | null {
-  if (!recursAnnually) {
-    if (base >= monthStart && base < monthEndExclusive) return base;
-    return null;
-  }
-  const year = monthStart.getUTCFullYear();
-  const candidate = new Date(
-    Date.UTC(year, base.getUTCMonth(), base.getUTCDate()),
-  );
-  if (candidate >= monthStart && candidate < monthEndExclusive) {
-    return candidate;
-  }
-  return null;
-}
-
 const DUE_COLOR: Record<DueStatus, string> = {
   overdue: "error.main",
   "due-soon": "warning.main",
@@ -117,89 +71,36 @@ const TWO_COL = {
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const sp = await searchParams;
-  const monthIso = sp.month ?? currentMonthIso();
+  const monthIso = isValidMonthIso(sp.month) ? sp.month : currentMonthIso();
   const budgetMonth = isoToFirstOfMonth(monthIso);
 
-  // Fetch active recurring outflows that are live for this budget month
-  // (started before/at the month, and either ongoing or ending after it).
-  const [
-    outItems,
-    incomeEntries,
-    settings,
-    calendarEvents,
-    people,
-    activeRenewals,
-  ] = await Promise.all([
-    prisma.recurringItem.findMany({
-      where: {
-        active: true,
-        OR: [{ endDate: null }, { endDate: { gte: budgetMonth } }],
-      },
-    }),
-    prisma.incomeEntry.findMany({ where: { month: budgetMonth } }),
-    getSettings(),
-    prisma.calendarEvent.findMany(),
-    prisma.person.findMany({ where: { birthday: { not: null } } }),
+  // Budget maths are shared with the monthly setup wizard
+  // (src/lib/budget.ts) so both pages always agree.
+  const [budget, activeRenewals] = await Promise.all([
+    computeMonthBudget(budgetMonth),
     prisma.renewal.findMany({ where: { active: true } }),
   ]);
+  const {
+    settings,
+    incomeEntries,
+    recurringItems: outItems,
+    monthEvents,
+    eventsTotal,
+    incomeTotal: incomeMonthly,
+    committed: outflowMonthly,
+    discretionary,
+    hasIncome,
+    allocation,
+    plan,
+    completedSteps,
+  } = budget;
 
-  // Calendar entries falling in the selected budget month — drives the
-  // "Birthdays & Events" pot total + the dedicated section below.
-  const monthEndExclusive = shiftMonths(budgetMonth, 1);
-  const monthEvents: MonthEvent[] = [];
-
-  for (const e of calendarEvents) {
-    const occ = occurrenceInMonth(
-      e.date,
-      e.recursAnnually,
-      budgetMonth,
-      monthEndExclusive,
-    );
-    if (!occ) continue;
-    const importance = (e.importance ?? null) as ImportanceLevel | null;
-    monthEvents.push({
-      kind: "EVENT",
-      title: e.title,
-      date: occ,
-      amount: resolveEventAmount(settings, e.amount, importance),
-      importance,
-    });
-  }
-
-  for (const p of people) {
-    if (!p.birthday) continue;
-    const occ = occurrenceInMonth(
-      p.birthday,
-      true,
-      budgetMonth,
-      monthEndExclusive,
-    );
-    if (!occ) continue;
-    const importance = p.importance as ImportanceLevel;
-    monthEvents.push({
-      kind: "BIRTHDAY",
-      title: `${p.name}'s birthday`,
-      date: occ,
-      amount: giftAmountFor(settings, importance),
-      importance,
-    });
-  }
-
-  monthEvents.sort((a, b) => a.date.getTime() - b.date.getTime());
-  const eventsTotal = monthEvents.reduce((acc, e) => acc + e.amount, 0);
-
-  const incomeMonthly = incomeEntries.reduce((acc, e) => acc + e.amount, 0);
-  const recurringOutflow = outItems.reduce(
-    (acc, i) => acc + monthlyEquivalent(i.amount, i.frequency as Frequency),
-    0,
-  );
-  const outflowMonthly = recurringOutflow + eventsTotal;
-  const discretionary = incomeMonthly - outflowMonthly;
-  const hasIncome = incomeMonthly > 0;
-
-  const suggestedSavings = Math.max(0, discretionary) * settings.savingsPercent;
-  const suggestedInvest = Math.max(0, discretionary) * settings.investPercent;
-  const suggestedFree = Math.max(0, discretionary) * settings.freePercent;
+  // The saved plan for the month if there is one, else the Settings split.
+  const suggestedSavings = allocation.savings;
+  const suggestedInvest = allocation.invest;
+  const suggestedFree = allocation.free;
+  const planReady = plan?.completedAt != null;
+  const stepsDone = completedSteps.size;
 
   // Pot summary
   const byCategory = new Map<BudgetCategory, PotSummary>();
@@ -341,10 +242,60 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               ? formatGBP(suggestedSavings + suggestedInvest)
               : "—"
           }
-          sub={`Suggested · ${Math.round((settings.savingsPercent + settings.investPercent) * 100)}% of left over`}
+          sub={
+            allocation.source === "plan"
+              ? "Your plan · savings + investments"
+              : `Suggested · ${Math.round((settings.savingsPercent + settings.investPercent) * 100)}% of left over`
+          }
           tone={hasIncome && discretionary > 0 ? "primary" : "muted"}
         />
       </KpiGrid>
+
+      {/* ── Month setup prompt ───────────────────────────────────── */}
+      {!planReady ? (
+        <Card
+          component="section"
+          aria-labelledby="dash-setup"
+          sx={{ bgcolor: "m3.primaryContainer", color: "m3.onPrimaryContainer" }}
+        >
+          <CardContent
+            sx={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 2,
+            }}
+          >
+            <Box sx={{ minWidth: 0, flex: "1 1 260px" }}>
+              <Typography variant="overline" component="p" sx={{ opacity: 0.8 }}>
+                Month setup
+              </Typography>
+              <Typography id="dash-setup" variant="h5" component="h2">
+                {stepsDone === 0
+                  ? `Set up ${monthName}`
+                  : `${monthName} setup · ${stepsDone} of ${WIZARD_STEPS.length} steps done`}
+              </Typography>
+              <Typography variant="body2" sx={{ mt: 0.5, opacity: 0.9 }}>
+                Income, events, recurring costs and car trips, then allocate what&apos;s left.
+              </Typography>
+              <LinearProgress
+                variant="determinate"
+                value={(stepsDone / WIZARD_STEPS.length) * 100}
+                aria-label={`${stepsDone} of ${WIZARD_STEPS.length} steps complete`}
+                sx={{
+                  mt: 1.5,
+                  bgcolor: "rgba(0,0,0,0.08)",
+                  "& .MuiLinearProgress-bar": { bgcolor: "m3.onPrimaryContainer" },
+                }}
+              />
+            </Box>
+            <LinkButton href={setupHref(monthIso)} variant="contained" arrow={false}>
+              {stepsDone === 0 ? "Start setup" : "Continue setup"}
+            </LinkButton>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {/* ── Allocation + smart split ─────────────────────────────── */}
       <Box sx={TWO_COL}>
@@ -392,10 +343,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
         <Card component="section" aria-labelledby="dash-split">
           <PanelHeader
-            eyebrow="Smart allocation"
+            eyebrow={allocation.source === "plan" ? "Your allocation" : "Smart allocation"}
             title="After bills are paid"
             id="dash-split"
-            meta={<AutoAwesomeOutlined fontSize="small" sx={{ color: "primary.main" }} />}
+            meta={
+              allocation.source === "plan" ? (
+                <LinkButton href={setupHref(monthIso, "allocation")}>Adjust</LinkButton>
+              ) : (
+                <AutoAwesomeOutlined fontSize="small" sx={{ color: "primary.main" }} />
+              )
+            }
           />
           {!hasIncome ? (
             <EmptyPanel
@@ -415,11 +372,29 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </CardContent>
           ) : (
             <CardContent>
+              <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1.5 }}>
+                {allocation.source === "plan"
+                  ? `The split you chose for ${monthName}.`
+                  : `Suggested from your Settings percentages — set up the month to choose your own.`}
+              </Typography>
               <DiscretionaryBreakdown
                 total={discretionary}
                 savings={suggestedSavings}
                 invest={suggestedInvest}
                 free={suggestedFree}
+                footer={
+                  allocation.source === "plan" ? (
+                    <>
+                      Your plan. Change it in{" "}
+                      <TextLink href={setupHref(monthIso, "allocation")}>Month setup</TextLink>.
+                    </>
+                  ) : (
+                    <>
+                      Suggested split. Default percentages live in{" "}
+                      <TextLink href="/settings">settings</TextLink>.
+                    </>
+                  )
+                }
               />
             </CardContent>
           )}
@@ -703,11 +678,14 @@ function DiscretionaryBreakdown({
   savings,
   invest,
   free,
+  footer,
 }: {
   total: number;
   savings: number;
   invest: number;
   free: number;
+  /** Where these numbers come from and how to change them. */
+  footer: React.ReactNode;
 }) {
   const segments = [
     { label: "Savings", value: savings, color: categoryColor(0) },
@@ -760,7 +738,7 @@ function DiscretionaryBreakdown({
         component="p"
         sx={{ pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}
       >
-        Suggested split. Adjust in <TextLink href="/settings">settings</TextLink>.
+        {footer}
       </Typography>
     </Stack>
   );

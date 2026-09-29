@@ -46,6 +46,8 @@ import UploadFileOutlined from "@mui/icons-material/UploadFileOutlined";
 import UploadFileRounded from "@mui/icons-material/UploadFileRounded";
 import SettingsOutlined from "@mui/icons-material/SettingsOutlined";
 import SettingsRounded from "@mui/icons-material/SettingsRounded";
+import ChecklistOutlined from "@mui/icons-material/ChecklistOutlined";
+import ChecklistRounded from "@mui/icons-material/ChecklistRounded";
 import MoreHorizRounded from "@mui/icons-material/MoreHorizRounded";
 import LightModeOutlined from "@mui/icons-material/LightModeOutlined";
 import DarkModeOutlined from "@mui/icons-material/DarkModeOutlined";
@@ -81,6 +83,7 @@ const ICONS: Record<NavIconKey, [SvgIconComponent, SvgIconComponent]> = {
   mileage: [DirectionsCarOutlined, DirectionsCarRounded],
   imports: [UploadFileOutlined, UploadFileRounded],
   settings: [SettingsOutlined, SettingsRounded],
+  setup: [ChecklistOutlined, ChecklistRounded],
   more: [MoreHorizRounded, MoreHorizRounded],
 };
 

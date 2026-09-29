@@ -27,6 +27,7 @@ export type NavIconKey =
   | "mileage"
   | "imports"
   | "settings"
+  | "setup"
   | "more";
 
 export interface NavSection {
@@ -52,6 +53,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     section: "Plan",
     items: [
+      { href: "/setup", label: "Month setup", shortLabel: "Setup", icon: "setup" },
       { href: "/calendar", label: "Calendar", icon: "calendar" },
       { href: "/people", label: "People", icon: "people" },
     ],
